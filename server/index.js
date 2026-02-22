@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const { extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
+const { sendCustomerSMS, sendOwnerEmail } = require('./notificationService');
 
 const app = express();
 app.use(express.json());
@@ -59,16 +60,29 @@ app.post('/webhook/booking', async (req, res) => {
     console.log('📋 Complete booking data:', bookingData);
     
     // Save booking to database
-    const savedBooking = await saveBooking(business, bookingData, callId);
-    console.log(`💾 Booking saved with ID: ${savedBooking.id}`);
+const savedBooking = await saveBooking(business, bookingData, callId);
+console.log(`💾 Booking saved with ID: ${savedBooking.id}`);
+
+// Send notifications
+try {
+  await sendCustomerSMS(business, savedBooking);
+  await sendOwnerEmail(business, savedBooking);
+  
+  // Update booking to mark notifications as sent
+  await supabase
+    .from('bookings')
+    .update({ sms_sent: true, email_sent: true })
+    .eq('id', savedBooking.id);
     
-    // TODO: Send SMS and email notifications
-    // We'll add this next
-    
-    res.status(200).json({ 
-      success: true,
-      bookingId: savedBooking.id
-    });
+} catch (notificationError) {
+  console.error('⚠️  Notification error:', notificationError);
+  // Don't fail the whole request if notifications fail
+}
+
+res.status(200).json({ 
+  success: true,
+  bookingId: savedBooking.id
+});
     
   } catch (error) {
     console.error('❌ Webhook error:', error);
@@ -126,6 +140,26 @@ app.post('/api/businesses', async (req, res) => {
     if (error) throw error;
     
     res.status(201).json({ business: data });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API endpoint to update a business
+app.patch('/api/businesses/:businessId', async (req, res) => {
+  try {
+    const { businessId } = req.params;
+    
+    const { data, error } = await supabase
+      .from('businesses')
+      .update(req.body)
+      .eq('id', businessId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    res.json({ business: data });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
