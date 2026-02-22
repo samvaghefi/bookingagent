@@ -3,6 +3,9 @@ const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const { extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
 const { sendCustomerSMS, sendOwnerEmail } = require('./notificationService');
+const { getAuthUrl, getTokensFromCode, createCalendarEvent } = require('./calendarService');
+
+
 
 const app = express();
 app.use(express.json());
@@ -67,6 +70,9 @@ console.log(`💾 Booking saved with ID: ${savedBooking.id}`);
 try {
   await sendCustomerSMS(business, savedBooking);
   await sendOwnerEmail(business, savedBooking);
+  
+  // Create Google Calendar event
+  await createCalendarEvent(business, savedBooking);
   
   // Update booking to mark notifications as sent
   await supabase
@@ -164,6 +170,52 @@ app.patch('/api/businesses/:businessId', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+
+// Route to initiate Google Calendar connection
+app.get('/connect-calendar/:businessId', (req, res) => {
+  const { businessId } = req.params;
+  const authUrl = getAuthUrl(businessId);
+  res.redirect(authUrl);
+});
+
+// OAuth callback - Google redirects here after authorization
+app.get('/auth/google/callback', async (req, res) => {
+  try {
+    const { code, state } = req.query;
+    const businessId = state; // We passed business ID as state
+    
+    // Exchange code for tokens
+    const tokens = await getTokensFromCode(code);
+    
+    // Save tokens to database
+    const { error } = await supabase
+      .from('businesses')
+      .update({
+        google_access_token: tokens.access_token,
+        google_refresh_token: tokens.refresh_token,
+        google_token_expiry: new Date(tokens.expiry_date)
+      })
+      .eq('id', businessId);
+    
+    if (error) throw error;
+    
+    res.send(`
+      <html>
+        <body style="font-family: Arial; padding: 40px; text-align: center;">
+          <h1>✅ Calendar Connected!</h1>
+          <p>Your Google Calendar has been successfully connected to BookingAgent.</p>
+          <p>You can close this window.</p>
+        </body>
+      </html>
+    `);
+  } catch (error) {
+    console.error('OAuth callback error:', error);
+    res.status(500).send('Error connecting calendar');
+  }
+});
+
+
 
 // Start server
 const PORT = process.env.PORT || 3000;
