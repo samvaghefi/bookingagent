@@ -1,5 +1,22 @@
 const { createClient } = require('@supabase/supabase-js');
 
+// Convert "7 PM" to "19:00:00" format
+function convertTo24HourTime(timeStr) {
+  if (!timeStr) return null;
+  
+  const match = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+  if (!match) return timeStr; // Return as-is if format not recognized
+  
+  let hours = parseInt(match[1]);
+  const minutes = match[2] || '00';
+  const period = match[3].toUpperCase();
+  
+  if (period === 'PM' && hours !== 12) hours += 12;
+  if (period === 'AM' && hours === 12) hours = 0;
+  
+  return `${hours.toString().padStart(2, '0')}:${minutes}:00`;
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
@@ -111,7 +128,7 @@ async function saveBooking(business, bookingData, vapiCallId) {
       customer_phone: bookingData.customerPhone,
       service_ids: [bookingData.service], // Array of services
       appointment_date: bookingData.date,
-      appointment_time: bookingData.time,
+      appointment_time: convertTo24HourTime(bookingData.time),
       special_requests: bookingData.specialRequests,
       vapi_call_id: vapiCallId,
       status: 'confirmed'
