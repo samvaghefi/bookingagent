@@ -118,11 +118,32 @@ if (!name) {
   const timeMatch = summary.match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))/i);
   const time = timeMatch ? timeMatch[1] : null;
   
-  // Extract special requests
-  const fullText = summary + ' ' + transcript;
-  const specialMatches = fullText.match(/(?:low fade|high fade|skin fade|taper|buzz cut|faded beard)/gi);
-  const specialRequests = specialMatches ? [...new Set(specialMatches.map(s => s.toLowerCase()))].join(', ') : null;
-  
+  // Extract special requests - only from what customer actually requested
+let specialRequests = null;
+
+// Look for patterns like "requested X", "wants X", "asked for X"
+const requestPatterns = [
+  /(?:requested|wants|asked for|would like)\s+(?:a\s+)?([^,.]+)/gi,
+  /He requested (?:a\s+)?([^,.]+)/i,
+  /She requested (?:a\s+)?([^,.]+)/i
+];
+
+const requestedItems = [];
+for (const pattern of requestPatterns) {
+  const matches = summary.matchAll(pattern);
+  for (const match of matches) {
+    const item = match[1].trim().toLowerCase();
+    // Only include if it's a known style
+    if (/buzz cut|low fade|high fade|skin fade|taper|faded beard/i.test(item)) {
+      requestedItems.push(item);
+    }
+  }
+}
+
+if (requestedItems.length > 0) {
+  specialRequests = [...new Set(requestedItems)].join(', ');
+}
+
   return {
     name,
     customerPhone,
