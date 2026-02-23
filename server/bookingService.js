@@ -56,20 +56,35 @@ function extractBookingInfo(vapiData) {
   
   console.log('Summary:', summary);
   
-  // Extract name from summary - improved pattern
+  // Extract name from summary - improved robust pattern
 let name = null;
 
-// Look for "for [Name]" pattern (common in summaries)
-const forNameMatch = summary.match(/\bfor\s+([A-Z][a-z]+)\b/);
-if (forNameMatch && forNameMatch[1].toLowerCase() !== 'sam') {
-  name = forNameMatch[1];
+// Clean the summary to avoid false matches
+const cleanSummary = summary.replace(/Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday/gi, '');
+
+// Pattern 1: "The user, [Name]," or "user, [Name],"
+const userNameMatch = summary.match(/\b(?:the\s+)?user,?\s+([A-Z][a-z]+)/i);
+if (userNameMatch && userNameMatch[1].toLowerCase() !== 'called') {
+  name = userNameMatch[1];
 }
 
-// If not found, try "Name called" pattern
+// Pattern 2: "[Name] called" at the very start (before we removed day names)
 if (!name) {
-  const summaryNameMatch = summary.match(/^([A-Z][a-z]+)\s+called/);
-  if (summaryNameMatch && summaryNameMatch[1].toLowerCase() !== 'customer') {
-    name = summaryNameMatch[1];
+  const calledMatch = summary.match(/^([A-Z][a-z]+)\s+called/);
+  if (calledMatch) {
+    const potentialName = calledMatch[1];
+    // Make sure it's not a day of the week
+    if (!['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].includes(potentialName)) {
+      name = potentialName;
+    }
+  }
+}
+
+// Pattern 3: "for [Name]" 
+if (!name) {
+  const forNameMatch = cleanSummary.match(/\bfor\s+([A-Z][a-z]+)\b/);
+  if (forNameMatch && forNameMatch[1].toLowerCase() !== 'sam') {
+    name = forNameMatch[1];
   }
 }
   
