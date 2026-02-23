@@ -17,6 +17,29 @@ function convertTo24HourTime(timeStr) {
   return `${hours.toString().padStart(2, '0')}:${minutes}:00`;
 }
 
+// Convert "Wednesday, February 25th, 2026" to "2026-02-25" format
+function convertToISODate(dateStr) {
+  if (!dateStr) return null;
+  
+  try {
+    // Parse the date string
+    const date = new Date(dateStr);
+    
+    // Check if valid
+    if (isNaN(date.getTime())) return null;
+    
+    // Format as YYYY-MM-DD
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  } catch (error) {
+    console.error('Date conversion error:', error);
+    return null;
+  }
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
@@ -33,29 +56,22 @@ function extractBookingInfo(vapiData) {
   
   console.log('Summary:', summary);
   
-  // Extract name
-  let name = null;
+  // Extract name from summary - improved pattern
+let name = null;
+
+// Look for "for [Name]" pattern (common in summaries)
+const forNameMatch = summary.match(/\bfor\s+([A-Z][a-z]+)\b/);
+if (forNameMatch && forNameMatch[1].toLowerCase() !== 'sam') {
+  name = forNameMatch[1];
+}
+
+// If not found, try "Name called" pattern
+if (!name) {
   const summaryNameMatch = summary.match(/^([A-Z][a-z]+)\s+called/);
   if (summaryNameMatch && summaryNameMatch[1].toLowerCase() !== 'customer') {
     name = summaryNameMatch[1];
   }
-  
-  if (!name) {
-    const transcriptPatterns = [
-      /(?:my name is|I'm|call me|this is)\s+([A-Za-z]+)/i,
-      /name'?s?\s+([A-Za-z]+)/i
-    ];
-    
-    for (const pattern of transcriptPatterns) {
-      const match = transcript.match(pattern);
-      if (match && match[1] && 
-          match[1].toLowerCase() !== 'sarah' && 
-          match[1].toLowerCase() !== 'barbershop') {
-        name = match[1];
-        break;
-      }
-    }
-  }
+}
   
   // Extract service
   let service = 'appointment';
@@ -127,7 +143,7 @@ async function saveBooking(business, bookingData, vapiCallId) {
       customer_name: bookingData.name,
       customer_phone: bookingData.customerPhone,
       service_ids: [bookingData.service], // Array of services
-      appointment_date: bookingData.date,
+      appointment_date: convertToISODate(bookingData.date),
       appointment_time: convertTo24HourTime(bookingData.time),
       special_requests: bookingData.specialRequests,
       vapi_call_id: vapiCallId,
