@@ -124,8 +124,8 @@ let specialRequests = null;
 // Look for patterns like "requested X", "wants X", "asked for X"
 const requestPatterns = [
   /(?:requested|wants|asked for|would like)\s+(?:a\s+)?([^,.]+)/gi,
-  /He requested (?:a\s+)?([^,.]+)/i,
-  /She requested (?:a\s+)?([^,.]+)/i
+  /He requested (?:a\s+)?([^,.]+)/gi,
+  /She requested (?:a\s+)?([^,.]+)/gi
 ];
 
 const requestedItems = [];
