@@ -1,5 +1,6 @@
 const { google } = require('googleapis');
 const { createClient } = require('@supabase/supabase-js');
+const { DateTime } = require('luxon');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -54,18 +55,21 @@ async function createCalendarEvent(business, booking) {
     // Initialize Calendar API
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
     
-// Parse date and time - simpler approach
-const appointmentDateTime = new Date(`${booking.appointment_date}T${booking.appointment_time}`);
+// Parse date and time in Toronto timezone using Luxon
+const appointmentDateTime = DateTime.fromFormat(
+  `${booking.appointment_date} ${booking.appointment_time}`,
+  'yyyy-MM-dd HH:mm:ss',
+  { zone: 'America/Toronto' }
+);
 
 // Check if valid
-if (isNaN(appointmentDateTime.getTime())) {
-  console.error('Invalid date/time:', booking.appointment_date, booking.appointment_time);
+if (!appointmentDateTime.isValid) {
+  console.error('Invalid date/time:', appointmentDateTime.invalidReason);
   return null;
 }
 
-// Calculate end time
-const endDate = new Date(appointmentDateTime);
-endDate.setMinutes(endDate.getMinutes() + (booking.duration_minutes || 30));
+// Calculate end time (30 minutes later)
+const endDateTime = appointmentDateTime.plus({ minutes: booking.duration_minutes || 30 });
     
     // Create event
     const event = {
@@ -79,13 +83,13 @@ Special Requests: ${booking.special_requests || 'None'}
 Booked via BookingAgent
       `.trim(),
       start: {
-        dateTime: appointmentDate.toISOString(),
-        timeZone: 'America/Toronto'
-      },
-      end: {
-        dateTime: endDate.toISOString(),
-        timeZone: 'America/Toronto'
-      },
+  dateTime: appointmentDateTime.toISO(),
+  timeZone: 'America/Toronto'
+},
+end: {
+  dateTime: endDateTime.toISO(),
+  timeZone: 'America/Toronto'
+},
       attendees: booking.customer_email ? [{ email: booking.customer_email }] : [],
       reminders: {
         useDefault: false,
