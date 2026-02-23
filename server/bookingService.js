@@ -132,11 +132,12 @@ if (!name) {
   const timeMatch = summary.match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))/i);
   const time = timeMatch ? timeMatch[1] : null;
   
-  // Extract special requests - only from what customer actually requested
+// Extract special requests - only from what customer actually requested
 let specialRequests = null;
 
-// Look for patterns like "requested X", "wants X", "asked for X"
+// Look for patterns like "with X", "requested X", "wants X"
 const requestPatterns = [
+  /\bwith (?:a\s+)?([^,.]+)/gi,
   /(?:requested|wants|asked for|would like)\s+(?:a\s+)?([^,.]+)/gi,
   /He requested (?:a\s+)?([^,.]+)/gi,
   /She requested (?:a\s+)?([^,.]+)/gi
