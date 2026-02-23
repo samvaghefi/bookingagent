@@ -56,38 +56,52 @@ function extractBookingInfo(vapiData) {
   
   console.log('Summary:', summary);
   
-  // Extract name from summary - improved robust pattern
+// Extract name from summary - comprehensive patterns
 let name = null;
 
-// Clean the summary to avoid false matches
-const cleanSummary = summary.replace(/Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday/gi, '');
-
-// Pattern 1: "The user, [Name]," or "user, [Name],"
-const userNameMatch = summary.match(/\b(?:the\s+)?user,?\s+([A-Z][a-z]+)/i);
-if (userNameMatch && userNameMatch[1].toLowerCase() !== 'called') {
-  name = userNameMatch[1];
+// Pattern 1: "[Name] successfully" or "[Name] called"
+const nameActionMatch = summary.match(/^([A-Z][a-z]+)\s+(?:successfully|called)/);
+if (nameActionMatch) {
+  const potentialName = nameActionMatch[1];
+  // Make sure it's not a day of the week
+  if (!['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].includes(potentialName)) {
+    name = potentialName;
+  }
 }
 
-// Pattern 2: "[Name] called" at the very start (before we removed day names)
+// Pattern 2: "The user, [Name]," or "user, [Name],"
 if (!name) {
-  const calledMatch = summary.match(/^([A-Z][a-z]+)\s+called/);
-  if (calledMatch) {
-    const potentialName = calledMatch[1];
-    // Make sure it's not a day of the week
-    if (!['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].includes(potentialName)) {
-      name = potentialName;
-    }
+  const userNameMatch = summary.match(/\b(?:the\s+)?user,?\s+([A-Z][a-z]+)/i);
+  if (userNameMatch && userNameMatch[1].toLowerCase() !== 'called') {
+    name = userNameMatch[1];
   }
 }
 
 // Pattern 3: "for [Name]" 
 if (!name) {
-  const forNameMatch = cleanSummary.match(/\bfor\s+([A-Z][a-z]+)\b/);
-  if (forNameMatch && forNameMatch[1].toLowerCase() !== 'sam') {
+  const forNameMatch = summary.match(/\bfor\s+([A-Z][a-z]+)\b/);
+  if (forNameMatch && forNameMatch[1].toLowerCase() !== 'sam' && forNameMatch[1] !== 'Thursday') {
     name = forNameMatch[1];
   }
 }
+
+// Pattern 4: Look in transcript as last resort
+if (!name) {
+  const transcriptPatterns = [
+    /(?:my name is|I'm|call me|this is)\s+([A-Z][a-z]+)/i,
+    /name'?s?\s+([A-Z][a-z]+)/i
+  ];
   
+  for (const pattern of transcriptPatterns) {
+    const match = transcript.match(pattern);
+    if (match && match[1] && 
+        match[1].toLowerCase() !== 'sarah' && 
+        match[1].toLowerCase() !== 'barbershop') {
+      name = match[1];
+      break;
+    }
+  }
+}  
   // Extract service
   let service = 'appointment';
   
