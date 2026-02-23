@@ -1,3 +1,40 @@
+const { google } = require('googleapis');
+const { createClient } = require('@supabase/supabase-js');
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
+
+// Create OAuth2 client
+function getOAuthClient() {
+  return new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    `${process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000'}/auth/google/callback`
+  );
+}
+
+// Generate authorization URL for a business to connect their calendar
+function getAuthUrl(businessId) {
+  const oauth2Client = getOAuthClient();
+  
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/calendar'],
+    state: businessId // Pass business ID to identify which business is connecting
+  });
+  
+  return url;
+}
+
+// Exchange authorization code for tokens
+async function getTokensFromCode(code) {
+  const oauth2Client = getOAuthClient();
+  const { tokens } = await oauth2Client.getToken(code);
+  return tokens;
+}
+
 // Create calendar event
 async function createCalendarEvent(business, booking) {
   try {
@@ -75,3 +112,9 @@ Booked via BookingAgent
     return null;
   }
 }
+
+module.exports = {
+  getAuthUrl,
+  getTokensFromCode,
+  createCalendarEvent
+};
