@@ -56,21 +56,25 @@ async function createCalendarEvent(business, booking) {
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
     
 // Parse date and time in Toronto timezone using Luxon
+// First, clean the date by removing ordinal suffixes (st, nd, rd, th)
+const cleanDate = booking.appointment_date.replace(/(\d+)(?:st|nd|rd|th)/g, '$1');
+
 const appointmentDateTime = DateTime.fromFormat(
-  `${booking.appointment_date} ${booking.appointment_time}`,
-  'yyyy-MM-dd HH:mm:ss',
+  `${cleanDate} ${booking.appointment_time}`,
+  'EEEE, MMMM d, yyyy HH:mm:ss',
   { zone: 'America/Toronto' }
 );
 
 // Check if valid
 if (!appointmentDateTime.isValid) {
   console.error('Invalid date/time:', appointmentDateTime.invalidReason);
+  console.error('Attempted to parse:', cleanDate, booking.appointment_time);
   return null;
 }
 
 // Calculate end time (30 minutes later)
 const endDateTime = appointmentDateTime.plus({ minutes: booking.duration_minutes || 30 });
-    
+ 
     // Create event
     const event = {
       summary: `${booking.service_ids.join(' & ')} - ${booking.customer_name}`,
