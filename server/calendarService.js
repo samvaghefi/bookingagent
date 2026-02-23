@@ -54,10 +54,13 @@ async function createCalendarEvent(business, booking) {
     // Initialize Calendar API
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
     
-    // Parse date and time
-    const appointmentDate = new Date(booking.appointment_date);
-    const [hours, minutes] = booking.appointment_time.split(':');
-    appointmentDate.setHours(parseInt(hours), parseInt(minutes), 0);
+    // Parse date and time correctly for Toronto timezone
+const [datePart] = booking.appointment_date.split('T'); // Get just the date part
+const [hours, minutes] = booking.appointment_time.split(':');
+
+// Create date string in ISO format for Toronto timezone
+const dateTimeString = `${datePart}T${hours.padStart(2, '0')}:${minutes.padStart(2, '0')}:00`;
+const appointmentDate = new Date(dateTimeString);
     
     // Calculate end time (default 30 minutes)
     const endDate = new Date(appointmentDate);
