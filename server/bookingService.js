@@ -5,7 +5,7 @@ function convertTo24HourTime(timeStr) {
   if (!timeStr) return null;
   
   const match = timeStr.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
-  if (!match) return timeStr; // Return as-is if format not recognized
+  if (!match) return timeStr;
   
   let hours = parseInt(match[1]);
   const minutes = match[2] || '00';
@@ -22,19 +22,14 @@ function convertToISODate(dateStr) {
   if (!dateStr) return null;
   
   try {
-    // Remove ordinal suffixes (st, nd, rd, th) before parsing
     const cleanedDate = dateStr.replace(/(\d+)(?:st|nd|rd|th)/g, '$1');
-    
-    // Parse the cleaned date string
     const date = new Date(cleanedDate);
     
-    // Check if valid
     if (isNaN(date.getTime())) {
       console.error('Failed to parse date:', dateStr, '-> cleaned:', cleanedDate);
       return null;
     }
     
-    // Format as YYYY-MM-DD
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
@@ -51,7 +46,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-// Extract booking info from Vapi webhook (reusing barbershop logic)
+// Extract booking info from Vapi webhook
 function extractBookingInfo(vapiData) {
   const message = vapiData.message || vapiData;
   const transcript = message.transcript || message.artifact?.transcript || '';
@@ -62,74 +57,69 @@ function extractBookingInfo(vapiData) {
   
   console.log('Summary:', summary);
   
-// Extract name from summary - comprehensive patterns
-let name = null;
-
-// Pattern 1: "[Name] successfully" or "[Name] called"
-const nameActionMatch = summary.match(/^([A-Z][a-z]+)\s+(?:successfully|called)/);
-if (nameActionMatch) {
-  const potentialName = nameActionMatch[1];
-  // Make sure it's not a day of the week
-  if (!['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].includes(potentialName)) {
-    name = potentialName;
-  }
-}
-
-// Pattern 2: "The user, [Name]," or "user, [Name],"
-if (!name) {
-  const userNameMatch = summary.match(/\b(?:the\s+)?user,?\s+([A-Z][a-z]+)/i);
-  if (userNameMatch && userNameMatch[1].toLowerCase() !== 'called') {
-    name = userNameMatch[1];
-  }
-}
-
-// Pattern 3: "for [Name]" 
-if (!name) {
-  const forNameMatch = summary.match(/\bfor\s+([A-Z][a-z]+)\b/);
-  if (forNameMatch && forNameMatch[1].toLowerCase() !== 'sam' && forNameMatch[1] !== 'Thursday') {
-    name = forNameMatch[1];
-  }
-}
-
-// Pattern 4: Look in transcript as last resort
-if (!name) {
-  const transcriptPatterns = [
-    /(?:my name is|I'm|call me|this is)\s+([A-Z][a-z]+)/i,
-    /name'?s?\s+([A-Z][a-z]+)/i
-  ];
+  // Extract name
+  let name = null;
   
-  for (const pattern of transcriptPatterns) {
-    const match = transcript.match(pattern);
-    if (match && match[1] && 
-        match[1].toLowerCase() !== 'sarah' && 
-        match[1].toLowerCase() !== 'barbershop') {
-      name = match[1];
-      break;
+  const nameActionMatch = summary.match(/^([A-Z][a-z]+)\s+(?:successfully|called)/);
+  if (nameActionMatch) {
+    const potentialName = nameActionMatch[1];
+    if (!['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].includes(potentialName)) {
+      name = potentialName;
     }
   }
-}  
- // Extract service
-let service = 'appointment';
-
-if (/changed.*(?:to|request to)\s+(?:a\s+)?beard\s*trim/i.test(summary)) {
-  service = 'beard trim';
-} else if (/changed.*(?:to|request to)\s+(?:a\s+)?(?:men's\s+)?haircut/i.test(summary)) {
-  service = "men's haircut";
-} else {
-  const hasBeardTrim = /\bbeard\s*trim\b/i.test(summary);
-  const hasKidsHaircut = /kid'?s?\s+haircut|child'?s?\s+haircut|haircut\s+for\s+(?:his|her)\s+(?:son|daughter|child)/i.test(summary);
-  // Only check for general haircut if it's NOT a kid's haircut
-  const hasHaircut = !hasKidsHaircut && /\b(?:men's\s+)?haircut\b/i.test(summary);
   
-  const services = [];
-  if (hasHaircut) services.push("men's haircut");
-  if (hasKidsHaircut) services.push("kid's haircut");
-  if (hasBeardTrim) services.push('beard trim');
-  
-  if (services.length > 0) {
-    service = services.join(' and ');
+  if (!name) {
+    const userNameMatch = summary.match(/\b(?:the\s+)?user,?\s+([A-Z][a-z]+)/i);
+    if (userNameMatch && userNameMatch[1].toLowerCase() !== 'called') {
+      name = userNameMatch[1];
+    }
   }
-}
+  
+  if (!name) {
+    const forNameMatch = summary.match(/\bfor\s+([A-Z][a-z]+)\b/);
+    if (forNameMatch && forNameMatch[1].toLowerCase() !== 'sam' && !['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].includes(forNameMatch[1])) {
+      name = forNameMatch[1];
+    }
+  }
+  
+  if (!name) {
+    const transcriptPatterns = [
+      /(?:my name is|I'm|call me|this is)\s+([A-Z][a-z]+)/i,
+      /name'?s?\s+([A-Z][a-z]+)/i
+    ];
+    
+    for (const pattern of transcriptPatterns) {
+      const match = transcript.match(pattern);
+      if (match && match[1] && 
+          match[1].toLowerCase() !== 'sarah' && 
+          match[1].toLowerCase() !== 'barbershop') {
+        name = match[1];
+        break;
+      }
+    }
+  }
+  
+  // Extract service
+  let service = 'appointment';
+  
+  if (/changed.*(?:to|request to)\s+(?:a\s+)?beard\s*trim/i.test(summary)) {
+    service = 'beard trim';
+  } else if (/changed.*(?:to|request to)\s+(?:a\s+)?(?:men's\s+)?haircut/i.test(summary)) {
+    service = "men's haircut";
+  } else {
+    const hasBeardTrim = /\bbeard\s*trim\b/i.test(summary);
+    const hasKidsHaircut = /kid'?s?\s+haircut|child'?s?\s+haircut|haircut\s+for\s+(?:his|her)\s+(?:son|daughter|child)/i.test(summary);
+    const hasHaircut = !hasKidsHaircut && /\b(?:men's\s+)?haircut\b/i.test(summary);
+    
+    const services = [];
+    if (hasHaircut) services.push("men's haircut");
+    if (hasKidsHaircut) services.push("kid's haircut");
+    if (hasBeardTrim) services.push('beard trim');
+    
+    if (services.length > 0) {
+      service = services.join(' and ');
+    }
+  }
   
   // Extract date
   const dateMatch = summary.match(/(?:Thursday|Friday|Saturday|Sunday|Monday|Tuesday|Wednesday),?\s+([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/i);
@@ -139,40 +129,41 @@ if (/changed.*(?:to|request to)\s+(?:a\s+)?beard\s*trim/i.test(summary)) {
   const timeMatch = summary.match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))/i);
   const time = timeMatch ? timeMatch[1] : null;
   
-// Extract special requests - only from what customer actually requested
-// Extract special requests - capture any custom requests mentioned
-let specialRequests = null;
-
-// Look for various request patterns in the summary
-const requestPatterns = [
-  /requesting (?:a\s+)?"([^"]+)"/i,  // "requesting a "Ronaldo inspired style""
-  /requested (?:a\s+)?([^,.]+)/i,     // "requested a low fade"
-  /\bwith (?:a\s+)?([^,.]+)/gi,       // "haircut with a low fade"
-  /wants (?:a\s+)?([^,.]+)/i,         // "wants a buzz cut"
-  /asked for (?:a\s+)?([^,.]+)/i      // "asked for a high fade"
-];
-
-const requestedItems = [];
-for (const pattern of requestPatterns) {
-  const match = summary.match(pattern);
-  if (match && match[1]) {
-    const item = match[1].trim();
-    // Filter out generic words
-    if (item.length > 2 && 
-        !item.toLowerCase().includes('haircut') && 
-        !item.toLowerCase().includes('appointment') &&
-        !item.toLowerCase().includes('his son') &&
-        !item.toLowerCase().includes('himself')) {
-      requestedItems.push(item);
-      break; // Take first valid match to avoid duplicates
+  // Extract special requests - focus on first sentence only
+  let specialRequests = null;
+  
+  // Get just the first sentence where the booking request is described
+  const firstSentence = summary.split(/\. The appointment|\.  The|The appointment/)[0];
+  
+  // Pattern 1: Quoted requests (highest priority)
+  const quoteMatch = firstSentence.match(/requesting (?:a\s+)?"([^"]+)"/i);
+  if (quoteMatch) {
+    specialRequests = quoteMatch[1];
+  }
+  
+  // Pattern 2: "haircut with a [style]"
+  if (!specialRequests) {
+    const withMatch = firstSentence.match(/(?:haircut|trim)\s+with\s+(?:a\s+)?([a-z\s]+?)(?:\s+for|\.|,|$)/i);
+    if (withMatch) {
+      const item = withMatch[1].trim();
+      // Exclude if it looks like a person reference
+      if (!item.match(/\b(his|her|their|my|the|sammy|bobby|johnny)\b/i)) {
+        specialRequests = item;
+      }
     }
   }
-}
-
-if (requestedItems.length > 0) {
-  specialRequests = requestedItems.join(', ');
-}
-
+  
+  // Pattern 3: "requesting [style]" without quotes
+  if (!specialRequests) {
+    const requestMatch = firstSentence.match(/requesting\s+(?:a\s+)?([a-z\s]+?)(?:\.|,|for)/i);
+    if (requestMatch) {
+      const item = requestMatch[1].trim();
+      if (!item.match(/\b(haircut|appointment|his|her)\b/i)) {
+        specialRequests = item;
+      }
+    }
+  }
+  
   return {
     name,
     customerPhone,
@@ -207,7 +198,7 @@ async function saveBooking(business, bookingData, vapiCallId) {
       business_id: business.id,
       customer_name: bookingData.name,
       customer_phone: bookingData.customerPhone,
-      service_ids: [bookingData.service], // Array of services
+      service_ids: [bookingData.service],
       appointment_date: convertToISODate(bookingData.date),
       appointment_time: convertTo24HourTime(bookingData.time),
       special_requests: bookingData.specialRequests,
