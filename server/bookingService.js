@@ -57,31 +57,44 @@ function extractBookingInfo(vapiData) {
   
   console.log('Summary:', summary);
   
-  // Extract name
+  // Extract name - comprehensive approach
   let name = null;
   
-  const nameActionMatch = summary.match(/^([A-Z][a-z]+)\s+(?:successfully|called)/);
-  if (nameActionMatch) {
-    const potentialName = nameActionMatch[1];
-    if (!['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].includes(potentialName)) {
-      name = potentialName;
-    }
+  // Pattern 1: "for their son/daughter, [Name],"
+  const forChildMatch = summary.match(/for (?:their|his|her) (?:son|daughter|child),\s+([A-Z][a-z]+)/i);
+  if (forChildMatch) {
+    name = forChildMatch[1];
   }
   
+  // Pattern 2: "[Name] called" at start
   if (!name) {
-    const userNameMatch = summary.match(/\b(?:the\s+)?user,?\s+([A-Z][a-z]+)/i);
-    if (userNameMatch && userNameMatch[1].toLowerCase() !== 'called') {
-      name = userNameMatch[1];
+    const calledMatch = summary.match(/^([A-Z][a-z]+)\s+called/);
+    if (calledMatch && !['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'The'].includes(calledMatch[1])) {
+      name = calledMatch[1];
     }
   }
   
+  // Pattern 3: "The user, [Name]," or "user [Name]"
   if (!name) {
-    const forNameMatch = summary.match(/\bfor\s+([A-Z][a-z]+)\b/);
-    if (forNameMatch && forNameMatch[1].toLowerCase() !== 'sam' && !['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].includes(forNameMatch[1])) {
-      name = forNameMatch[1];
+    const userMatch = summary.match(/(?:The\s+)?user[,\s]+([A-Z][a-z]+)/i);
+    if (userMatch && userMatch[1].toLowerCase() !== 'successfully') {
+      name = userMatch[1];
     }
   }
   
+  // Pattern 4: Look for any capitalized name that isn't a keyword
+  if (!name) {
+    const allNames = summary.match(/\b([A-Z][a-z]{2,})\b/g);
+    if (allNames) {
+      const excludeWords = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'The', 'Sam', 'Barbershop', 'AI', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'January', 'February'];
+      const validName = allNames.find(n => !excludeWords.includes(n));
+      if (validName) {
+        name = validName;
+      }
+    }
+  }
+  
+  // Fallback: check transcript
   if (!name) {
     const transcriptPatterns = [
       /(?:my name is|I'm|call me|this is)\s+([A-Z][a-z]+)/i,
@@ -90,9 +103,7 @@ function extractBookingInfo(vapiData) {
     
     for (const pattern of transcriptPatterns) {
       const match = transcript.match(pattern);
-      if (match && match[1] && 
-          match[1].toLowerCase() !== 'sarah' && 
-          match[1].toLowerCase() !== 'barbershop') {
+      if (match && match[1] && match[1].toLowerCase() !== 'sarah') {
         name = match[1];
         break;
       }
@@ -108,8 +119,8 @@ function extractBookingInfo(vapiData) {
     service = "men's haircut";
   } else {
     const hasBeardTrim = /\bbeard\s*trim\b/i.test(summary);
-    const hasKidsHaircut = /kid'?s?\s+haircut|child'?s?\s+haircut|haircut\s+for\s+(?:his|her)\s+(?:son|daughter|child)/i.test(summary);
-    const hasHaircut = !hasKidsHaircut && /\b(?:men's\s+)?haircut\b/i.test(summary);
+    const hasKidsHaircut = /kid'?s?\s+haircut|child'?s?\s+haircut|haircut\s+for\s+(?:his|her|their)\s+(?:son|daughter|child)/i.test(summary);
+    const hasHaircut = !hasKidsHaircut && /\b(?:men's\s+|adult\s+)?haircut\b/i.test(summary);
     
     const services = [];
     if (hasHaircut) services.push("men's haircut");
@@ -129,38 +140,37 @@ function extractBookingInfo(vapiData) {
   const timeMatch = summary.match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))/i);
   const time = timeMatch ? timeMatch[1] : null;
   
-  // Extract special requests - focus on first sentence only
+  // Extract special requests - robust extraction from first sentence
   let specialRequests = null;
   
-  // Get just the first sentence where the booking request is described
-  const firstSentence = summary.split(/\. The appointment|\.  The|The appointment/)[0];
+  // Split at common delimiters to isolate the booking description
+  const bookingDescription = summary.split(/\. The appointment|\.  The|The AI|and the|, and the/i)[0];
   
-  // Pattern 1: Quoted requests (highest priority)
-  const quoteMatch = firstSentence.match(/requesting (?:a\s+)?"([^"]+)"/i);
-  if (quoteMatch) {
-    specialRequests = quoteMatch[1];
+  // Pattern 1: "requesting [something]"
+  const requestingMatch = bookingDescription.match(/requesting\s+(?:a\s+)?([a-z\s]+?)(?:\.|,|for their|for his|for her|$)/i);
+  if (requestingMatch) {
+    const req = requestingMatch[1].trim();
+    if (req.length > 2 && !req.match(/haircut|appointment|book/i)) {
+      specialRequests = req;
+    }
   }
   
-  // Pattern 2: "haircut with a [style]"
+  // Pattern 2: "with a [style]"
   if (!specialRequests) {
-    const withMatch = firstSentence.match(/(?:haircut|trim)\s+with\s+(?:a\s+)?([a-z\s]+?)(?:\s+for|\.|,|$)/i);
+    const withMatch = bookingDescription.match(/(?:haircut|trim)\s+with\s+(?:a\s+)?([a-z\s]+?)(?:\s+for|\.|\,|$)/i);
     if (withMatch) {
-      const item = withMatch[1].trim();
-      // Exclude if it looks like a person reference
-      if (!item.match(/\b(his|her|their|my|the|sammy|bobby|johnny)\b/i)) {
-        specialRequests = item;
+      const req = withMatch[1].trim();
+      if (!req.match(/\b(his|her|their|son|daughter|child)\b/i)) {
+        specialRequests = req;
       }
     }
   }
   
-  // Pattern 3: "requesting [style]" without quotes
+  // Pattern 3: Quoted text
   if (!specialRequests) {
-    const requestMatch = firstSentence.match(/requesting\s+(?:a\s+)?([a-z\s]+?)(?:\.|,|for)/i);
-    if (requestMatch) {
-      const item = requestMatch[1].trim();
-      if (!item.match(/\b(haircut|appointment|his|her)\b/i)) {
-        specialRequests = item;
-      }
+    const quoteMatch = bookingDescription.match(/"([^"]+)"/);
+    if (quoteMatch) {
+      specialRequests = quoteMatch[1];
     }
   }
   
@@ -192,7 +202,7 @@ async function findBusiness(phoneNumber, assistantId) {
 
 // Save booking to database
 async function saveBooking(business, bookingData, vapiCallId) {
-  const { data, error } = await supabase
+  const { data, error} = await supabase
     .from('bookings')
     .insert({
       business_id: business.id,
