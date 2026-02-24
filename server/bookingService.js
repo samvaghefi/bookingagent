@@ -102,27 +102,28 @@ if (!name) {
     }
   }
 }  
-  // Extract service
-  let service = 'appointment';
+ // Extract service
+let service = 'appointment';
+
+if (/changed.*(?:to|request to)\s+(?:a\s+)?beard\s*trim/i.test(summary)) {
+  service = 'beard trim';
+} else if (/changed.*(?:to|request to)\s+(?:a\s+)?(?:men's\s+)?haircut/i.test(summary)) {
+  service = "men's haircut";
+} else {
+  const hasBeardTrim = /\bbeard\s*trim\b/i.test(summary);
+  const hasKidsHaircut = /kid'?s?\s+haircut|child'?s?\s+haircut|haircut\s+for\s+(?:his|her)\s+(?:son|daughter|child)/i.test(summary);
+  // Only check for general haircut if it's NOT a kid's haircut
+  const hasHaircut = !hasKidsHaircut && /\b(?:men's\s+)?haircut\b/i.test(summary);
   
-  if (/changed.*(?:to|request to)\s+(?:a\s+)?beard\s*trim/i.test(summary)) {
-    service = 'beard trim';
-  } else if (/changed.*(?:to|request to)\s+(?:a\s+)?(?:men's\s+)?haircut/i.test(summary)) {
-    service = "men's haircut";
-  } else {
-    const hasBeardTrim = /\bbeard\s*trim\b/i.test(summary);
-    const hasHaircut = /\b(?:men's\s+)?haircut\b/i.test(summary);
-    const hasKidsHaircut = /kid'?s?\s+haircut|child'?s?\s+haircut|haircut\s+for\s+(?:his|her)\s+(?:son|daughter|child)/i.test(summary);
-    
-    const services = [];
-    if (hasHaircut) services.push("men's haircut");
-    if (hasKidsHaircut) services.push("kid's haircut");
-    if (hasBeardTrim) services.push('beard trim');
-    
-    if (services.length > 0) {
-      service = services.join(' and ');
-    }
+  const services = [];
+  if (hasHaircut) services.push("men's haircut");
+  if (hasKidsHaircut) services.push("kid's haircut");
+  if (hasBeardTrim) services.push('beard trim');
+  
+  if (services.length > 0) {
+    service = services.join(' and ');
   }
+}
   
   // Extract date
   const dateMatch = summary.match(/(?:Thursday|Friday|Saturday|Sunday|Monday|Tuesday|Wednesday),?\s+([A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/i);
@@ -133,30 +134,37 @@ if (!name) {
   const time = timeMatch ? timeMatch[1] : null;
   
 // Extract special requests - only from what customer actually requested
+// Extract special requests - capture any custom requests mentioned
 let specialRequests = null;
 
-// Look for patterns like "with X", "requested X", "wants X"
+// Look for various request patterns in the summary
 const requestPatterns = [
-  /\bwith (?:a\s+)?([^,.]+)/gi,
-  /(?:requested|wants|asked for|would like)\s+(?:a\s+)?([^,.]+)/gi,
-  /He requested (?:a\s+)?([^,.]+)/gi,
-  /She requested (?:a\s+)?([^,.]+)/gi
+  /requesting (?:a\s+)?"([^"]+)"/i,  // "requesting a "Ronaldo inspired style""
+  /requested (?:a\s+)?([^,.]+)/i,     // "requested a low fade"
+  /\bwith (?:a\s+)?([^,.]+)/gi,       // "haircut with a low fade"
+  /wants (?:a\s+)?([^,.]+)/i,         // "wants a buzz cut"
+  /asked for (?:a\s+)?([^,.]+)/i      // "asked for a high fade"
 ];
 
 const requestedItems = [];
 for (const pattern of requestPatterns) {
-  const matches = summary.matchAll(pattern);
-  for (const match of matches) {
-    const item = match[1].trim().toLowerCase();
-    // Only include if it's a known style
-    if (/buzz cut|low fade|high fade|skin fade|taper|faded beard/i.test(item)) {
+  const match = summary.match(pattern);
+  if (match && match[1]) {
+    const item = match[1].trim();
+    // Filter out generic words
+    if (item.length > 2 && 
+        !item.toLowerCase().includes('haircut') && 
+        !item.toLowerCase().includes('appointment') &&
+        !item.toLowerCase().includes('his son') &&
+        !item.toLowerCase().includes('himself')) {
       requestedItems.push(item);
+      break; // Take first valid match to avoid duplicates
     }
   }
 }
 
 if (requestedItems.length > 0) {
-  specialRequests = [...new Set(requestedItems)].join(', ');
+  specialRequests = requestedItems.join(', ');
 }
 
   return {
