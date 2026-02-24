@@ -22,11 +22,17 @@ function convertToISODate(dateStr) {
   if (!dateStr) return null;
   
   try {
-    // Parse the date string
-    const date = new Date(dateStr);
+    // Remove ordinal suffixes (st, nd, rd, th) before parsing
+    const cleanedDate = dateStr.replace(/(\d+)(?:st|nd|rd|th)/g, '$1');
+    
+    // Parse the cleaned date string
+    const date = new Date(cleanedDate);
     
     // Check if valid
-    if (isNaN(date.getTime())) return null;
+    if (isNaN(date.getTime())) {
+      console.error('Failed to parse date:', dateStr, '-> cleaned:', cleanedDate);
+      return null;
+    }
     
     // Format as YYYY-MM-DD
     const year = date.getFullYear();
