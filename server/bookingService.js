@@ -140,39 +140,36 @@ function extractBookingInfo(vapiData) {
   const timeMatch = summary.match(/(\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm))/i);
   const time = timeMatch ? timeMatch[1] : null;
   
-  // Extract special requests - robust extraction from first sentence
-  let specialRequests = null;
-  
-  // Split at common delimiters to isolate the booking description
-  const bookingDescription = summary.split(/\. The appointment|\.  The|The AI|and the|, and the/i)[0];
-  
-  // Pattern 1: "requesting [something]"
-  const requestingMatch = bookingDescription.match(/requesting\s+(?:a\s+)?([a-z\s]+?)(?:\.|,|for their|for his|for her|$)/i);
-  if (requestingMatch) {
-    const req = requestingMatch[1].trim();
-    if (req.length > 2 && !req.match(/haircut|appointment|book/i)) {
-      specialRequests = req;
-    }
+ // Extract special requests - look for common request patterns
+let specialRequests = null;
+
+// Get the booking description (before appointment details)
+const bookingPart = summary.split(/\. The appointment|The AI/i)[0];
+
+// Pattern 1: "requesting [something]"
+let match = bookingPart.match(/requesting\s+(?:a\s+)?([a-z\s]+?)(?:\.|,|$)/i);
+if (match) {
+  const req = match[1].trim();
+  if (req.length > 2 && !req.match(/haircut|appointment|book/i)) {
+    specialRequests = req;
   }
-  
-  // Pattern 2: "with a [style]"
-  if (!specialRequests) {
-    const withMatch = bookingDescription.match(/(?:haircut|trim)\s+with\s+(?:a\s+)?([a-z\s]+?)(?:\s+for|\.|\,|$)/i);
-    if (withMatch) {
-      const req = withMatch[1].trim();
-      if (!req.match(/\b(his|her|their|son|daughter|child)\b/i)) {
-        specialRequests = req;
-      }
-    }
+}
+
+// Pattern 2: "with a [style]" anywhere in booking description
+if (!specialRequests) {
+  match = bookingPart.match(/\bwith\s+(?:a\s+)?([a-z\s]+?)(?:\s+and\s+beard|,|$)/i);
+  if (match) {
+    specialRequests = match[1].trim();
   }
-  
-  // Pattern 3: Quoted text
-  if (!specialRequests) {
-    const quoteMatch = bookingDescription.match(/"([^"]+)"/);
-    if (quoteMatch) {
-      specialRequests = quoteMatch[1];
-    }
+}
+
+// Pattern 3: Quoted text
+if (!specialRequests) {
+  match = bookingPart.match(/"([^"]+)"/);
+  if (match) {
+    specialRequests = match[1];
   }
+}
   
   return {
     name,
