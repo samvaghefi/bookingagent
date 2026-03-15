@@ -29,7 +29,11 @@ async function authMiddleware(req, res, next) {
   const skip = SKIP_PATHS.some(p => req.path === p || req.path.startsWith(p + '/'));
   if (skip || !req.path.startsWith('/api/')) return next();
 
-  const token = req.cookies?.bimbly_session;
+  // Accept token from either cookie (legacy) or Authorization: Bearer header (React dashboard)
+  const bearerToken = req.headers.authorization?.startsWith('Bearer ')
+    ? req.headers.authorization.slice(7)
+    : null;
+  const token = bearerToken || req.cookies?.bimbly_session;
   if (!token) {
     return res.status(401).json({ error: 'Authentication required' });
   }

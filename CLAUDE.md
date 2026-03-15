@@ -60,18 +60,20 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 
 ## Dashboard Auth
 - Login: GET /auth/dashboard/google → Google OAuth (email + profile scope) → /auth/dashboard/callback
-- Callback looks up business by email, creates JWT (7d), sets httpOnly cookie `bimbly_session`
-- If no matching business: redirect to /dashboard/login?error=no_account
-- Logout: GET /auth/logout → clears cookie, redirects to /dashboard/login
-- All /api/* routes require valid JWT cookie (authMiddleware.js)
+- Callback looks up business by email, creates JWT (7d), redirects to /dashboard?token=JWT
+- React app reads ?token= from URL, stores in localStorage as `bimbly_token`, strips from URL
+- If no matching business: redirect to /dashboard/login?error=no_account (which redirects to /auth/dashboard/login)
+- Logout: GET /auth/logout → redirects to /dashboard/login
+- All /api/* routes require valid JWT: accepted via Authorization: Bearer header (React) OR cookie `bimbly_session` (legacy)
 - JWT payload: { businessId, email } — signed with JWT_SECRET
 - Add /auth/dashboard/callback to Google OAuth Console authorized redirect URIs
+- Dashboard SPA served at GET /dashboard → dashboard/index.html (React + Babel standalone)
 
 ## Dashboard API Endpoints (all require auth)
 - GET  /api/business — business details (no tokens/secrets)
 - PUT  /api/business — update name, phone, address, business_hours, ai_name
 - GET  /api/bookings — bookings with optional ?date=, ?from=&to=, ?limit= (default: last 30 days)
-- GET  /api/analytics — totalBookingsThisMonth/LastMonth, todayBookings, upcomingBookings, revenueEstimate, busiestDays, popularServices, peakHours, bookingsByWeek
+- GET  /api/analytics — totalBookingsThisMonth/LastMonth, todayBookings (array), upcomingBookings (array), revenueEstimateThisMonth, busiestDays, popularServices, peakHours, bookingsByWeek
 - GET  /api/services — all services for the business
 - POST /api/services — create service { name, price, duration_minutes, description }
 - PUT  /api/services/:id — update service (ownership verified)
@@ -121,9 +123,7 @@ Pushing to main auto-deploys to Render.
 4. Verify hello@bimblyai.com as a SendGrid sender domain for welcome/internal emails
 5. Add JWT_SECRET to Render env vars (any long random string)
 6. Add /auth/dashboard/callback to Google OAuth Console authorized redirect URIs
-7. Build dashboard frontend that consumes /api/* endpoints
 
 ## Known Issues
 - System prompt has hardcoded date — needs {{currentDateTime}} variable
 - Preferred barber sometimes not captured correctly
-- No self-serve onboarding yet — businesses manually added to Supabase

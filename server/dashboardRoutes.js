@@ -320,24 +320,24 @@ router.get('/api/billing', async (req, res) => {
 
   if (!stripe_subscription_id) {
     return res.json({
-      status: subscription_status || 'inactive',
-      trialEndsAt: trial_ends_at || null,
-      nextBillingDate: null,
+      subscription_status: subscription_status || 'inactive',
+      trial_end: trial_ends_at ? Math.floor(new Date(trial_ends_at).getTime() / 1000) : null,
+      current_period_end: null,
       amount: 49,
       currency: 'CAD',
-      cancelAtPeriodEnd: false
+      cancel_at_period_end: false
     });
   }
 
   try {
     const sub = await stripe.subscriptions.retrieve(stripe_subscription_id);
     res.json({
-      status: subscription_status,
-      trialEndsAt: sub.trial_end ? new Date(sub.trial_end * 1000) : trial_ends_at,
-      nextBillingDate: sub.current_period_end ? new Date(sub.current_period_end * 1000) : null,
+      subscription_status: subscription_status,
+      trial_end: sub.trial_end || null,
+      current_period_end: sub.current_period_end || null,
       amount: 49,
       currency: 'CAD',
-      cancelAtPeriodEnd: sub.cancel_at_period_end
+      cancel_at_period_end: sub.cancel_at_period_end
     });
   } catch (err) {
     console.error('GET /api/billing error:', err.message);
