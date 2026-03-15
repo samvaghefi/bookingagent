@@ -137,29 +137,32 @@ function BookingsTable({ bookings }) {
         <thead>
           <tr>
             <th>Customer</th>
+            <th>Phone</th>
             <th>Service</th>
             <th>Date</th>
             <th>Time</th>
             <th>Barber</th>
             <th>Special Requests</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
           {bookings.map(b => (
             <tr key={b.id}>
               <td>
-                <div className="cell-name">{b.customer_name || '—'}</div>
-                <div className="cell-sub">{b.customer_phone || ''}</div>
+                <div className="cell-name">{String(b.customer_name || '—')}</div>
               </td>
-              <td>{Array.isArray(b.service_ids) ? b.service_ids.join(', ') : (b.service_ids || '—')}</td>
+              <td>{String(b.customer_phone || '—')}</td>
+              <td>{Array.isArray(b.service_ids) ? b.service_ids.join(', ') : String(b.service_ids || '—')}</td>
               <td>
                 {b.appointment_date
                   ? new Date(b.appointment_date + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
                   : '—'}
               </td>
-              <td>{b.appointment_time || '—'}</td>
-              <td>{b.preferred_barber || '—'}</td>
-              <td className="cell-requests">{b.special_requests || '—'}</td>
+              <td>{String(b.appointment_time || '—')}</td>
+              <td>{String(b.preferred_barber || '—')}</td>
+              <td className="cell-requests">{String(b.special_requests || '—')}</td>
+              <td>{String(b.status || '—')}</td>
             </tr>
           ))}
         </tbody>
