@@ -37,6 +37,7 @@ app.post('/webhook/booking', async (req, res) => {
     // ── Type A: Custom Tool Call ──────────────────────────────────────────────
     if (messageType === 'tool-calls') {
       console.log('Tool call received: bookAppointment');
+      console.log('Full tool call body:', JSON.stringify(req.body?.message, null, 2));
 
       const toolCalls = message.toolCallList || message.toolCalls || [];
       const toolCall = toolCalls.find(tc => tc.function?.name === 'bookAppointment');
