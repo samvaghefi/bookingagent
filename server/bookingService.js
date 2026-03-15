@@ -46,6 +46,21 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
+// Extract booking info from a Vapi Custom Tool call
+function extractFromToolCall(toolCallArgs) {
+  return {
+    name: toolCallArgs.customerName,
+    customerPhone: toolCallArgs.customerPhone || toolCallArgs.callbackNumber,
+    service: toolCallArgs.service,
+    date: toolCallArgs.appointmentDate,   // already YYYY-MM-DD
+    time: toolCallArgs.appointmentTime,   // already HH:MM
+    specialRequests: toolCallArgs.specialRequests || null,
+    serviceCount: toolCallArgs.serviceCount || 1,
+    preferredBarber: toolCallArgs.preferredBarber || null,
+    isNewCustomer: toolCallArgs.isNewCustomer || false
+  };
+}
+
 // Extract booking info from Vapi webhook
 function extractBookingInfo(vapiData) {
   const message = vapiData.message || vapiData;
@@ -199,31 +214,54 @@ async function findBusiness(phoneNumber, assistantId) {
 
 // Save booking to database
 async function saveBooking(business, bookingData, vapiCallId) {
-  const { data, error} = await supabase
+  const record = {
+    business_id: business.id,
+    customer_name: bookingData.name,
+    customer_phone: bookingData.customerPhone,
+    service_ids: [bookingData.service],
+    appointment_date: convertToISODate(bookingData.date),
+    appointment_time: convertTo24HourTime(bookingData.time),
+    special_requests: bookingData.specialRequests,
+    vapi_call_id: vapiCallId,
+    status: 'confirmed'
+  };
+
+  // Include new fields only if they have values — avoids errors if columns don't exist yet
+  if (bookingData.preferredBarber != null) record.preferred_barber = bookingData.preferredBarber;
+  if (bookingData.isNewCustomer != null) record.is_new_customer = bookingData.isNewCustomer;
+  if (bookingData.serviceCount != null) record.service_count = bookingData.serviceCount;
+
+  const { data, error } = await supabase
     .from('bookings')
-    .insert({
-      business_id: business.id,
-      customer_name: bookingData.name,
-      customer_phone: bookingData.customerPhone,
-      service_ids: [bookingData.service],
-      appointment_date: convertToISODate(bookingData.date),
-      appointment_time: convertTo24HourTime(bookingData.time),
-      special_requests: bookingData.specialRequests,
-      vapi_call_id: vapiCallId,
-      status: 'confirmed'
-    })
+    .insert(record)
     .select()
     .single();
-  
+
   if (error) {
+    // If the error is about unknown columns, retry without the optional new fields
+    if (error.message && error.message.includes('column')) {
+      console.warn('⚠️  Optional columns not found, retrying without them:', error.message);
+      delete record.preferred_barber;
+      delete record.is_new_customer;
+      delete record.service_count;
+      const retry = await supabase.from('bookings').insert(record).select().single();
+      if (retry.error) {
+        console.error('Error saving booking:', retry.error);
+        throw retry.error;
+      }
+      console.log('Booking saved successfully:', retry.data.id);
+      return retry.data;
+    }
     console.error('Error saving booking:', error);
     throw error;
   }
-  
+
+  console.log('Booking saved successfully:', data.id);
   return data;
 }
 
 module.exports = {
+  extractFromToolCall,
   extractBookingInfo,
   findBusiness,
   saveBooking

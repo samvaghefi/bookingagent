@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
-const { extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
+const { extractFromToolCall, extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
 const { sendCustomerSMS, sendOwnerEmail } = require('./notificationService');
 const { getAuthUrl, getTokensFromCode, createCalendarEvent } = require('./calendarService');
 
@@ -29,73 +29,109 @@ app.get('/', (req, res) => {
 app.post('/webhook/booking', async (req, res) => {
   try {
     console.log('📞 Received booking webhook');
-    
+
     const message = req.body.message || req.body;
-    const phoneNumber = message.phoneNumber?.number;
-    const assistantId = message.assistant?.id;
-    const callId = message.call?.id;
-    
-    // Find which business this call belongs to
-    const business = await findBusiness(phoneNumber, assistantId);
-    
-    if (!business) {
-      console.log('⚠️  Business not found for phone:', phoneNumber);
-      return res.status(200).json({ 
-        success: false, 
-        message: 'Business not found' 
+    const messageType = message.type;
+
+    // ── Type A: Custom Tool Call ──────────────────────────────────────────────
+    if (messageType === 'tool-calls') {
+      console.log('Tool call received: bookAppointment');
+
+      const toolCalls = message.toolCallList || message.toolCalls || [];
+      const toolCall = toolCalls.find(tc => tc.function?.name === 'bookAppointment');
+
+      if (!toolCall) {
+        return res.status(200).json({ results: [] });
+      }
+
+      // Parse JSON arguments string
+      const toolCallArgs = typeof toolCall.function.arguments === 'string'
+        ? JSON.parse(toolCall.function.arguments)
+        : toolCall.function.arguments;
+
+      const phoneNumber = message.call?.customer?.number;
+      const assistantId = message.call?.assistantId;
+      const callId = message.call?.id;
+
+      const business = await findBusiness(phoneNumber, assistantId);
+      if (!business) {
+        console.log('⚠️  Business not found for phone:', phoneNumber);
+        return res.status(200).json({
+          results: [{ toolCallId: toolCall.id, result: 'Error: business not found' }]
+        });
+      }
+
+      console.log(`✅ Found business: ${business.name}`);
+
+      const bookingData = extractFromToolCall(toolCallArgs);
+      console.log('Extracted booking data:', bookingData);
+
+      const savedBooking = await saveBooking(business, bookingData, callId);
+
+      // Send notifications (non-blocking)
+      try {
+        await sendCustomerSMS(business, savedBooking);
+        await sendOwnerEmail(business, savedBooking);
+        await createCalendarEvent(business, savedBooking);
+        await supabase
+          .from('bookings')
+          .update({ sms_sent: true, email_sent: true })
+          .eq('id', savedBooking.id);
+      } catch (notificationError) {
+        console.error('⚠️  Notification error:', notificationError);
+      }
+
+      // Respond to Vapi so the tool call resolves
+      return res.status(200).json({
+        results: [{ toolCallId: toolCall.id, result: 'Booking confirmed successfully' }]
       });
     }
-    
-    console.log(`✅ Found business: ${business.name}`);
-    
-    // Extract booking information
-    const bookingData = extractBookingInfo(req.body);
-    
-    // Validate we have required data
-    if (!bookingData.customerPhone || !bookingData.name || !bookingData.date || !bookingData.time) {
-      console.log('⚠️  Incomplete booking data:', bookingData);
-      return res.status(200).json({ 
-        success: false, 
-        message: 'Incomplete booking data' 
-      });
+
+    // ── Type B: End-of-Call Report (regex fallback) ───────────────────────────
+    if (messageType === 'end-of-call-report') {
+      const phoneNumber = message.phoneNumber?.number;
+      const assistantId = message.assistant?.id;
+      const callId = message.call?.id;
+
+      const business = await findBusiness(phoneNumber, assistantId);
+      if (!business) {
+        console.log('⚠️  Business not found for phone:', phoneNumber);
+        return res.status(200).json({ success: false, message: 'Business not found' });
+      }
+
+      console.log(`✅ Found business: ${business.name}`);
+
+      const bookingData = extractBookingInfo(req.body);
+      console.log('Extracted booking data:', bookingData);
+
+      if (!bookingData.customerPhone || !bookingData.name || !bookingData.date || !bookingData.time) {
+        console.log('⚠️  Incomplete booking data:', bookingData);
+        return res.status(200).json({ success: false, message: 'Incomplete booking data' });
+      }
+
+      const savedBooking = await saveBooking(business, bookingData, callId);
+
+      try {
+        await sendCustomerSMS(business, savedBooking);
+        await sendOwnerEmail(business, savedBooking);
+        await createCalendarEvent(business, savedBooking);
+        await supabase
+          .from('bookings')
+          .update({ sms_sent: true, email_sent: true })
+          .eq('id', savedBooking.id);
+      } catch (notificationError) {
+        console.error('⚠️  Notification error:', notificationError);
+      }
+
+      return res.status(200).json({ success: true, bookingId: savedBooking.id });
     }
-    
-    console.log('📋 Complete booking data:', bookingData);
-    
-    // Save booking to database
-const savedBooking = await saveBooking(business, bookingData, callId);
-console.log(`💾 Booking saved with ID: ${savedBooking.id}`);
 
-// Send notifications
-try {
-  await sendCustomerSMS(business, savedBooking);
-  await sendOwnerEmail(business, savedBooking);
-  
-  // Create Google Calendar event
-  await createCalendarEvent(business, savedBooking);
-  
-  // Update booking to mark notifications as sent
-  await supabase
-    .from('bookings')
-    .update({ sms_sent: true, email_sent: true })
-    .eq('id', savedBooking.id);
-    
-} catch (notificationError) {
-  console.error('⚠️  Notification error:', notificationError);
-  // Don't fail the whole request if notifications fail
-}
+    // Unknown message type — acknowledge without processing
+    return res.status(200).json({ received: true });
 
-res.status(200).json({ 
-  success: true,
-  bookingId: savedBooking.id
-});
-    
   } catch (error) {
     console.error('❌ Webhook error:', error);
-    res.status(500).json({ 
-      success: false,
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
