@@ -151,7 +151,7 @@ function BookingsTable({ bookings }) {
                 <div className="cell-name">{b.customer_name || '—'}</div>
                 <div className="cell-sub">{b.customer_phone || ''}</div>
               </td>
-              <td>{b.service || '—'}</td>
+              <td>{Array.isArray(b.service_ids) ? b.service_ids.join(', ') : (b.service_ids || '—')}</td>
               <td>
                 {b.appointment_date
                   ? new Date(b.appointment_date + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
@@ -198,10 +198,10 @@ function DashboardHome() {
   return (
     <div className="page-content">
       <div className="stats-row">
-        <StatCard label="Today's Bookings"   value={a.todayBookings ?? 0}         accent="#D85A30" />
+        <StatCard label="Today's Bookings"   value={Array.isArray(a.todayBookings) ? a.todayBookings.length : (a.todayBookings ?? 0)}         accent="#D85A30" />
         <StatCard label="This Month"          value={a.totalBookingsThisMonth ?? 0} accent="#534AB7" />
-        <StatCard label="Est. Revenue"        value={`$${(a.revenueEstimate ?? 0).toLocaleString()}`} accent="#10b981" sub="this month" />
-        <StatCard label="Upcoming This Week"  value={a.upcomingBookings ?? 0}       accent="#f59e0b" />
+        <StatCard label="Est. Revenue"        value={`$${(a.revenueEstimateThisMonth ?? 0).toLocaleString()}`} accent="#10b981" sub="this month" />
+        <StatCard label="Upcoming This Week"  value={Array.isArray(a.upcomingBookings) ? a.upcomingBookings.length : (a.upcomingBookings ?? 0)}       accent="#f59e0b" />
       </div>
 
       <div className="charts-row">
