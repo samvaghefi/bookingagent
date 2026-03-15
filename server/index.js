@@ -48,14 +48,18 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
         }).eq('id', businessId);
         console.log(`✅ Trial activated for business: ${businessId}`);
 
-        // Fetch business details for welcome emails
+        // Fetch business details for welcome emails (include plan)
         const { data: business } = await supabase
           .from('businesses')
-          .select('id, name, owner_name, email, phone, business_type')
+          .select('id, name, owner_name, email, phone, business_type, plan')
           .eq('id', businessId)
           .single();
 
+        // Also pull plan from Stripe metadata as fallback
         if (business) {
+          if (!business.plan && session.metadata?.plan) {
+            business.plan = session.metadata.plan;
+          }
           await sendWelcomeEmail(business);
           await sendInternalSignupNotification(business);
         }
@@ -853,9 +857,9 @@ app.get('/signup', (req, res) => {
 
 // POST /signup — create business and return Stripe checkout URL
 app.post('/signup', async (req, res) => {
-  const { businessName, ownerName, email, phone, businessType } = req.body;
+  const { businessName, ownerName, email, phone, businessType, plan = 'starter' } = req.body;
 
-  console.log('📝 Signup attempt:', { businessName, ownerName, email, phone, businessType });
+  console.log('📝 Signup attempt:', { businessName, ownerName, email, phone, businessType, plan });
 
   if (!businessName || !ownerName || !email || !phone || !businessType) {
     return res.status(400).json({ error: 'All fields are required.' });
@@ -863,7 +867,7 @@ app.post('/signup', async (req, res) => {
 
   let business;
   try {
-    business = await createBusiness({ businessName, ownerName, email, phone, businessType });
+    business = await createBusiness({ businessName, ownerName, email, phone, businessType, plan });
   } catch (err) {
     if (err.isUserFacing) {
       return res.status(409).json({ error: err.message });
@@ -878,7 +882,7 @@ app.post('/signup', async (req, res) => {
   }
 
   try {
-    const session = await createCheckoutSession(business.id, email);
+    const session = await createCheckoutSession(business.id, email, business.plan);
     res.json({ checkoutUrl: session.url });
   } catch (err) {
     console.error('❌ createCheckoutSession failed for business:', business.id);

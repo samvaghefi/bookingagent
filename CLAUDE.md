@@ -81,18 +81,24 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - GET  /api/billing — live subscription info from Stripe
 - POST /api/billing/cancel — cancel subscription at period end
 
+## Pricing Tiers
+- Starter: CA$79/mo — STRIPE_STARTER_PRICE_ID=price_1TBNPdLxC6AbeQxJ94QT68W8
+- Pro: CA$149/mo — STRIPE_PRO_PRICE_ID=price_1TBNRFLxC6AbeQxJPjyyMZZx
+- plan field stored on businesses table ('starter' | 'pro', default 'starter')
+- createCheckoutSession(businessId, email, plan) picks the right Stripe price ID
+
 ## Self-Serve Signup Flow
 - GET /signup — branded HTML signup form (name, business name, email, phone, business type)
-- POST /signup — validates fields, calls createBusiness(), creates Stripe Checkout Session, returns { checkoutUrl }
-- On checkout complete (Stripe webhook): sets is_active=true, subscription_status="trial", sends welcome email to owner + internal notification to hello@bimblyai.com
-- signupService.js inserts into businesses table with ai_name="Sarah", is_active=false until payment confirmed
+- POST /signup — accepts optional plan field ('starter'|'pro', default 'starter'), calls createBusiness(), creates Stripe Checkout Session for correct plan, returns { checkoutUrl }
+- On checkout complete (Stripe webhook): sets is_active=true, subscription_status="trial", sends welcome email (mentions plan) + internal notification to hello@bimblyai.com
+- signupService.js inserts into businesses table with ai_name="Sarah", plan, is_active=false until payment confirmed
 
 ## Stripe Billing
 - GET /billing/checkout?businessId=xxx — creates Stripe Checkout Session, redirects to Stripe hosted page
 - POST /billing/webhook — handles Stripe events (raw body required for sig verification)
 - GET /billing/success — shown after successful checkout
 - GET /billing/cancel — shown if user exits checkout
-- billingService.js exports: createCustomer, createSubscription, cancelSubscription, getSubscription, createCheckoutSession
+- billingService.js exports: createCustomer, createSubscription, cancelSubscription, getSubscription, createCheckoutSession(businessId, email, plan)
 - Webhook handles: checkout.session.completed, customer.subscription.deleted, customer.subscription.updated, invoice.payment_failed
 - STRIPE_WEBHOOK_SECRET: get from Stripe Dashboard → Developers → Webhooks after adding endpoint https://bookingagent-gmo2.onrender.com/billing/webhook
 - Webhook skips sig verification if STRIPE_WEBHOOK_SECRET is not set (logs a warning) — set it after creating the webhook in Stripe
@@ -106,7 +112,8 @@ ALTER TABLE businesses
   ADD COLUMN IF NOT EXISTS trial_ends_at timestamptz,
   ADD COLUMN IF NOT EXISTS billing_email text,
   ADD COLUMN IF NOT EXISTS owner_name text,
-  ADD COLUMN IF NOT EXISTS business_type text;
+  ADD COLUMN IF NOT EXISTS business_type text,
+  ADD COLUMN IF NOT EXISTS plan text DEFAULT 'starter';
 ```
 
 ## Deploy Workflow

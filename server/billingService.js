@@ -38,16 +38,23 @@ async function getSubscription(subscriptionId) {
 }
 
 // Create a Stripe Checkout Session for self-serve signup
-async function createCheckoutSession(businessId, businessEmail) {
-  console.log(`🛒 Creating checkout session for business: ${businessId}`);
+// plan: 'starter' | 'pro' (defaults to 'starter')
+async function createCheckoutSession(businessId, businessEmail, plan = 'starter') {
+  const priceId = plan === 'pro'
+    ? process.env.STRIPE_PRO_PRICE_ID
+    : (process.env.STRIPE_STARTER_PRICE_ID || process.env.STRIPE_PRICE_ID);
+
+  if (!priceId) throw new Error(`No Stripe price ID configured for plan: ${plan}`);
+
+  console.log(`🛒 Creating checkout session for business: ${businessId} (plan: ${plan})`);
   return stripe.checkout.sessions.create({
     mode: 'subscription',
     customer_email: businessEmail,
-    line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: 1 }],
+    line_items: [{ price: priceId, quantity: 1 }],
     subscription_data: { trial_period_days: 30 },
     success_url: `${BASE_URL}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${BASE_URL}/billing/cancel`,
-    metadata: { business_id: businessId }
+    metadata: { business_id: businessId, plan }
   });
 }
 

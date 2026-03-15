@@ -68,9 +68,11 @@ Please add this to your calendar.
 // Send welcome email to a new business owner after checkout completes
 async function sendWelcomeEmail(business) {
   const ownerName = business.owner_name || business.name;
+  const planLabels = { starter: 'Starter (CA$79/mo)', pro: 'Pro (CA$149/mo)' };
+  const planLabel = planLabels[business.plan] || planLabels.starter;
   const text = `Hi ${ownerName},
 
-Your 30-day free trial has started!
+Your 30-day free trial has started! You're on the ${planLabel} plan.
 
 Here's what happens next:
 1. We'll call you within 1 business day to set up your AI receptionist
@@ -100,6 +102,8 @@ The Bimbly Team`;
 
 // Send internal signup notification to hello@bimblyai.com
 async function sendInternalSignupNotification(business) {
+  const planLabels = { starter: 'Starter (CA$79/mo)', pro: 'Pro (CA$149/mo)' };
+  const planLabel = planLabels[business.plan] || planLabels.starter;
   const text = `New trial started:
 
 Business: ${business.name}
@@ -107,6 +111,7 @@ Owner: ${business.owner_name || 'N/A'}
 Email: ${business.email}
 Phone: ${business.phone || 'N/A'}
 Type: ${business.business_type || 'N/A'}
+Plan: ${planLabel}
 Business ID: ${business.id}
 
 Action required: Call them within 1 business day to complete setup.`;

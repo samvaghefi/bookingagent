@@ -6,7 +6,8 @@ const supabase = createClient(
 );
 
 async function createBusiness(data) {
-  const { businessName, ownerName, email, phone, businessType } = data;
+  const { businessName, ownerName, email, phone, businessType, plan = 'starter' } = data;
+  const validPlan = plan === 'pro' ? 'pro' : 'starter';
 
   const { data: business, error } = await supabase
     .from('businesses')
@@ -17,11 +18,12 @@ async function createBusiness(data) {
       phone,
       billing_email: email,
       business_type: businessType,
+      plan: validPlan,
       ai_name: 'Sarah',
       subscription_status: 'trial',
       is_active: false
     })
-    .select('id, name, owner_name, email, phone, business_type')
+    .select('id, name, owner_name, email, phone, business_type, plan')
     .single();
 
   if (error) {
