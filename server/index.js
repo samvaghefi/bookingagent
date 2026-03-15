@@ -28,7 +28,7 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options(/(.*)/, cors(corsOptions));
 
 // ── Stripe webhook (must be before express.json() to get raw body) ────────────
 app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
