@@ -10,7 +10,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-const DASHBOARD_URL = process.env.DASHBOARD_URL || 'https://bimblyai.com/dashboard';
+const DASHBOARD_URL = 'https://bookingagent-gmo2.onrender.com/dashboard';
 
 function getDashboardOAuthClient() {
   const base = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
@@ -77,7 +77,7 @@ router.get('/auth/dashboard/callback', async (req, res) => {
     );
 
     console.log(`✅ Dashboard login: ${business.name} (${email})`);
-    res.redirect(`${DASHBOARD_URL}?token=${token}`);
+    res.redirect(`${DASHBOARD_URL}/?token=${token}`);
   } catch (err) {
     console.error('❌ Dashboard OAuth callback error:', err.message);
     res.redirect(`${DASHBOARD_URL}/login?error=auth_failed`);

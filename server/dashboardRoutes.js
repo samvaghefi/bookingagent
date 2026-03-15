@@ -128,25 +128,14 @@ router.get('/api/analytics', async (req, res) => {
 
     if (error) throw error;
 
-    // Fetch services for revenue estimate
-    const { data: services } = await supabase
-      .from('services')
-      .select('name, price')
-      .eq('business_id', req.business.id);
-
-    const priceMap = {};
-    (services || []).forEach(s => {
-      if (s.name) priceMap[s.name.toLowerCase()] = parseFloat(s.price) || 0;
-    });
-
-    // Fallback prices when service isn't in the services table
-    function estimateServicePrice(name) {
-      const key = (name || '').toLowerCase().trim();
-      if (priceMap[key] > 0) return priceMap[key];
-      if (key.includes('kid') || key.includes('child')) return 25;
-      if (key.includes('beard')) return 20;
-      return 35; // default (men's haircut or unknown)
-    }
+    const PRICE_LOOKUP = {
+      "men's haircut": 35,
+      "beard trim": 20,
+      "men's haircut + beard trim": 50,
+      "kid's haircut": 25,
+      "men's haircut and beard trim": 50,
+      "haircut": 35,
+    };
 
     // Partition bookings
     const thisMonthBookings = bookings.filter(b => b.appointment_date >= thisMonthStr && b.appointment_date <= todayStr);
@@ -157,9 +146,10 @@ router.get('/api/analytics', async (req, res) => {
 
     // Revenue estimate this month
     const revenueEstimateThisMonth = thisMonthBookings.reduce((sum, b) => {
-      const services = b.service_ids || [];
-      if (services.length === 0) return sum + 35; // default if no service recorded
-      return sum + services.reduce((s, name) => s + estimateServicePrice(name), 0);
+      const raw = b.service_ids;
+      const name = Array.isArray(raw) ? raw[0] : raw;
+      const price = PRICE_LOOKUP[(name || '').toLowerCase().trim()] ?? 35;
+      return sum + price;
     }, 0);
 
     // Busiest days of week
