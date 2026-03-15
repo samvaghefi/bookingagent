@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { extractFromToolCall, extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
 const { sendCustomerSMS, sendOwnerEmail, sendWelcomeEmail, sendInternalSignupNotification, sendPaymentFailedEmail } = require('./notificationService');
@@ -13,6 +14,21 @@ const dashboardRoutes = require('./dashboardRoutes');
 const authRoutes = require('./authRoutes');
 
 const app = express();
+
+// ── CORS ──────────────────────────────────────────────────────────────────────
+const corsOptions = {
+  origin: [
+    'https://bimblyai.com',
+    'https://www.bimblyai.com',
+    'http://localhost:3000',
+    'http://localhost:8080'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 // ── Stripe webhook (must be before express.json() to get raw body) ────────────
 app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
