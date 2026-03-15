@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { extractFromToolCall, extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
 const { sendCustomerSMS, sendOwnerEmail, sendWelcomeEmail, sendInternalSignupNotification, sendPaymentFailedEmail } = require('./notificationService');
@@ -115,6 +116,17 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(authRoutes);
 app.use(dashboardRoutes);
+
+// ── Dashboard SPA ─────────────────────────────────────────────────────────────
+// Serve dashboard static files (JS, CSS) under /dashboard/
+app.use('/dashboard', express.static(path.join(__dirname, '..', 'dashboard')));
+// Catch-all: any /dashboard/* route serves the React app
+app.get('/dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'dashboard', 'index.html'));
+});
+app.get('/dashboard/login', (req, res) => {
+  res.redirect(`${process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000'}/auth/dashboard/login`);
+});
 
 // Initialize Supabase client
 const supabase = createClient(

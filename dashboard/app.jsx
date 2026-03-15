@@ -1,0 +1,993 @@
+'use strict';
+
+const { useState, useEffect, useCallback } = React;
+
+const API_BASE = 'https://bookingagent-gmo2.onrender.com';
+
+// ── API helper ────────────────────────────────────────────────────────────────
+async function apiFetch(path, options = {}) {
+  const token = localStorage.getItem('bimbly_token');
+  const res = await fetch(API_BASE + path, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      ...(options.headers || {}),
+    },
+  });
+  if (res.status === 401) {
+    localStorage.removeItem('bimbly_token');
+    window.location.href = API_BASE + '/auth/dashboard/google';
+    throw new Error('Unauthorized');
+  }
+  return res;
+}
+
+// ── Spinner ───────────────────────────────────────────────────────────────────
+function Spinner() {
+  return (
+    <div className="spinner-wrap">
+      <div className="spinner"></div>
+    </div>
+  );
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+function Sidebar({ page, setPage, business }) {
+  const navItems = [
+    { id: 'home',      label: 'Dashboard', icon: '◫' },
+    { id: 'bookings',  label: 'Bookings',  icon: '📅' },
+    { id: 'settings',  label: 'Settings',  icon: '⚙' },
+    { id: 'billing',   label: 'Billing',   icon: '💳' },
+  ];
+
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-logo">
+        <span className="logo-bimbly">bimbly</span><span className="logo-ai">ai</span>
+      </div>
+      <nav className="sidebar-nav">
+        {navItems.map(item => (
+          <button
+            key={item.id}
+            className={`nav-item ${page === item.id ? 'active' : ''}`}
+            onClick={() => setPage(item.id)}
+          >
+            <span className="nav-icon">{item.icon}</span>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <div className="sidebar-footer">
+        <div className="business-name">{business?.name || 'Your Business'}</div>
+        <button
+          className="logout-btn"
+          onClick={() => {
+            localStorage.removeItem('bimbly_token');
+            window.location.href = API_BASE + '/auth/logout';
+          }}
+        >
+          Sign out
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+// ── TopBar ────────────────────────────────────────────────────────────────────
+function TopBar({ title }) {
+  const today = new Date().toLocaleDateString('en-CA', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+  return (
+    <div className="topbar">
+      <h1 className="topbar-title">{title}</h1>
+      <span className="topbar-date">Today is {today}</span>
+    </div>
+  );
+}
+
+// ── StatCard ──────────────────────────────────────────────────────────────────
+function StatCard({ label, value, accent, sub }) {
+  return (
+    <div className="stat-card" style={{ borderLeftColor: accent }}>
+      <div className="stat-label">{label}</div>
+      <div className="stat-value" style={{ color: accent }}>{value}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
+    </div>
+  );
+}
+
+// ── CSS Bar Chart ─────────────────────────────────────────────────────────────
+function BarChart({ data, color }) {
+  if (!data || !data.length) return <div className="empty-chart">No data yet</div>;
+  const max = Math.max(...data.map(d => d.count), 1);
+  return (
+    <div className="bar-chart">
+      {data.map((item, i) => (
+        <div key={i} className="bar-row">
+          <div className="bar-label">{item.label || item.day || item.service || item.name}</div>
+          <div className="bar-track">
+            <div
+              className="bar-fill"
+              style={{ width: `${(item.count / max) * 100}%`, background: color }}
+            ></div>
+          </div>
+          <div className="bar-count">{item.count}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Bookings Table ────────────────────────────────────────────────────────────
+function BookingsTable({ bookings }) {
+  if (!bookings.length) {
+    return (
+      <div className="empty-state">
+        <div className="empty-icon">📞</div>
+        <div className="empty-title">No bookings yet</div>
+        <div className="empty-sub">Your AI receptionist is ready to take calls</div>
+      </div>
+    );
+  }
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Customer</th>
+            <th>Service</th>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Barber</th>
+            <th>Special Requests</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bookings.map(b => (
+            <tr key={b.id}>
+              <td>
+                <div className="cell-name">{b.customer_name || '—'}</div>
+                <div className="cell-sub">{b.customer_phone || ''}</div>
+              </td>
+              <td>{b.service || '—'}</td>
+              <td>
+                {b.appointment_date
+                  ? new Date(b.appointment_date + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
+                  : '—'}
+              </td>
+              <td>{b.appointment_time || '—'}</td>
+              <td>{b.preferred_barber || '—'}</td>
+              <td className="cell-requests">{b.special_requests || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Dashboard Home ────────────────────────────────────────────────────────────
+function DashboardHome() {
+  const [analytics, setAnalytics] = useState(null);
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    Promise.all([
+      apiFetch('/api/analytics').then(r => r.json()),
+      apiFetch('/api/bookings?limit=10').then(r => r.json()),
+    ])
+      .then(([a, b]) => {
+        setAnalytics(a);
+        setBookings(b.bookings || []);
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <Spinner />;
+  if (error) return <div className="error-msg" style={{ margin: 24 }}>{error}</div>;
+
+  const a = analytics || {};
+  const busiestDays = (a.busiestDays || []).map(d => ({ ...d, label: d.day }));
+  const popularServices = (a.popularServices || []).map(s => ({ ...s, label: s.service }));
+
+  return (
+    <div className="page-content">
+      <div className="stats-row">
+        <StatCard label="Today's Bookings"   value={a.todayBookings ?? 0}         accent="#D85A30" />
+        <StatCard label="This Month"          value={a.totalBookingsThisMonth ?? 0} accent="#534AB7" />
+        <StatCard label="Est. Revenue"        value={`$${(a.revenueEstimate ?? 0).toLocaleString()}`} accent="#10b981" sub="this month" />
+        <StatCard label="Upcoming This Week"  value={a.upcomingBookings ?? 0}       accent="#f59e0b" />
+      </div>
+
+      <div className="charts-row">
+        <div className="card">
+          <div className="card-header">Bookings by Day of Week</div>
+          <BarChart data={busiestDays} color="#534AB7" />
+        </div>
+        <div className="card">
+          <div className="card-header">Popular Services</div>
+          <BarChart data={popularServices} color="#D85A30" />
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">Recent Bookings</div>
+        <BookingsTable bookings={bookings} />
+      </div>
+    </div>
+  );
+}
+
+// ── Bookings Page ─────────────────────────────────────────────────────────────
+function BookingsPage() {
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState('month');
+
+  useEffect(() => {
+    setLoading(true);
+    let query = '/api/bookings';
+    const today = new Date().toISOString().slice(0, 10);
+    if (filter === 'today') {
+      query += `?date=${today}`;
+    } else if (filter === 'week') {
+      const from = new Date();
+      from.setDate(from.getDate() - 7);
+      query += `?from=${from.toISOString().slice(0, 10)}&to=${today}`;
+    }
+    apiFetch(query)
+      .then(r => r.json())
+      .then(d => setBookings(d.bookings || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [filter]);
+
+  return (
+    <div className="page-content">
+      <div className="filter-bar">
+        {[
+          { id: 'today', label: 'Today' },
+          { id: 'week',  label: 'This Week' },
+          { id: 'month', label: 'This Month' },
+        ].map(f => (
+          <button
+            key={f.id}
+            className={`filter-btn ${filter === f.id ? 'active' : ''}`}
+            onClick={() => setFilter(f.id)}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+      <div className="card">
+        {loading ? <Spinner /> : <BookingsTable bookings={bookings} />}
+      </div>
+    </div>
+  );
+}
+
+// ── Settings Page ─────────────────────────────────────────────────────────────
+const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+
+function SettingsPage() {
+  const [business, setBusiness]   = useState(null);
+  const [services, setServices]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [saving, setSaving]       = useState(false);
+  const [saveMsg, setSaveMsg]     = useState('');
+  const [newService, setNewService] = useState(null);
+  const [barbers, setBarbers]     = useState([]);
+  const [newBarber, setNewBarber] = useState('');
+
+  useEffect(() => {
+    Promise.all([
+      apiFetch('/api/business').then(r => r.json()),
+      apiFetch('/api/services').then(r => r.json()),
+    ])
+      .then(([b, s]) => {
+        setBusiness(b);
+        setServices(s.services || s || []);
+        setBarbers(b.barbers || []);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      await apiFetch('/api/business', {
+        method: 'PUT',
+        body: JSON.stringify({
+          name:           business.name,
+          phone:          business.phone,
+          address:        business.address,
+          business_hours: business.business_hours,
+          ai_name:        business.ai_name,
+          barbers,
+        }),
+      });
+      setSaveMsg('Saved!');
+      setTimeout(() => setSaveMsg(''), 2500);
+    } catch {
+      setSaveMsg('Failed to save.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addService = async () => {
+    if (!newService?.name) return;
+    try {
+      const res = await apiFetch('/api/services', {
+        method: 'POST',
+        body: JSON.stringify(newService),
+      });
+      const data = await res.json();
+      setServices(s => [...s, data.service || data]);
+      setNewService(null);
+    } catch {}
+  };
+
+  const deleteService = async id => {
+    try {
+      await apiFetch(`/api/services/${id}`, { method: 'DELETE' });
+      setServices(s => s.filter(x => x.id !== id));
+    } catch {}
+  };
+
+  const updateHours = (day, field, value) => {
+    setBusiness(b => ({
+      ...b,
+      business_hours: {
+        ...(b.business_hours || {}),
+        [day]: {
+          ...(b.business_hours?.[day] || { open: '09:00', close: '18:00', closed: false }),
+          [field]: value,
+        },
+      },
+    }));
+  };
+
+  if (loading) return <Spinner />;
+  const hours = business?.business_hours || {};
+
+  return (
+    <div className="page-content settings-page">
+
+      {/* ── Business Info ── */}
+      <div className="card">
+        <div className="card-header">Business Info</div>
+        <div className="settings-grid">
+          <div className="form-group">
+            <label>Business Name</label>
+            <input
+              value={business?.name || ''}
+              onChange={e => setBusiness(b => ({ ...b, name: e.target.value }))}
+            />
+          </div>
+          <div className="form-group">
+            <label>Phone Number</label>
+            <input
+              value={business?.phone || ''}
+              onChange={e => setBusiness(b => ({ ...b, phone: e.target.value }))}
+            />
+          </div>
+          <div className="form-group full-width">
+            <label>Address</label>
+            <input
+              value={business?.address || ''}
+              onChange={e => setBusiness(b => ({ ...b, address: e.target.value }))}
+            />
+          </div>
+          <div className="form-group">
+            <label>AI Receptionist Name</label>
+            <input
+              value={business?.ai_name || ''}
+              onChange={e => setBusiness(b => ({ ...b, ai_name: e.target.value }))}
+              placeholder="e.g. Sarah"
+            />
+          </div>
+        </div>
+
+        <div className="card-subheader">Business Hours</div>
+        <div className="hours-grid">
+          {DAYS.map(day => {
+            const h = hours[day] || { open: '09:00', close: '18:00', closed: false };
+            return (
+              <div key={day} className="hours-row">
+                <span className="day-label">
+                  {day.charAt(0).toUpperCase() + day.slice(1)}
+                </span>
+                <label className="toggle-label">
+                  <input
+                    type="checkbox"
+                    checked={!h.closed}
+                    onChange={e => updateHours(day, 'closed', !e.target.checked)}
+                  />
+                  <span className="toggle-text">{h.closed ? 'Closed' : 'Open'}</span>
+                </label>
+                {!h.closed && (
+                  <>
+                    <input
+                      type="time"
+                      value={h.open}
+                      className="time-input"
+                      onChange={e => updateHours(day, 'open', e.target.value)}
+                    />
+                    <span className="time-sep">to</span>
+                    <input
+                      type="time"
+                      value={h.close}
+                      className="time-input"
+                      onChange={e => updateHours(day, 'close', e.target.value)}
+                    />
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="save-row">
+          {saveMsg && (
+            <span className={`save-msg ${saveMsg === 'Saved!' ? 'success' : 'error'}`}>
+              {saveMsg}
+            </span>
+          )}
+          <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Services ── */}
+      <div className="card">
+        <div className="card-header">Services</div>
+        <div className="services-list">
+          {services.length === 0 && (
+            <div style={{ color: '#9ca3af', fontSize: 13, padding: '8px 0' }}>
+              No services yet — add your first one below.
+            </div>
+          )}
+          {services.map(s => (
+            <div key={s.id} className="service-row">
+              <div className="service-info">
+                <span className="service-name">{s.name}</span>
+                <span className="service-meta">
+                  {s.duration_minutes ? `${s.duration_minutes} min` : ''}
+                  {s.duration_minutes && s.price ? ' · ' : ''}
+                  {s.price ? `$${parseFloat(s.price).toFixed(0)}` : ''}
+                </span>
+              </div>
+              <button className="btn-icon-danger" onClick={() => deleteService(s.id)}>
+                Remove
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {newService === null ? (
+          <div style={{ padding: '12px 24px' }}>
+            <button
+              className="btn-outline"
+              onClick={() => setNewService({ name: '', price: '', duration_minutes: '' })}
+            >
+              + Add Service
+            </button>
+          </div>
+        ) : (
+          <div className="add-service-form">
+            <input
+              placeholder="Service name"
+              value={newService.name}
+              onChange={e => setNewService(s => ({ ...s, name: e.target.value }))}
+              style={{ flex: 2 }}
+            />
+            <input
+              placeholder="Price ($)"
+              type="number"
+              value={newService.price}
+              onChange={e => setNewService(s => ({ ...s, price: e.target.value }))}
+              style={{ flex: 1, minWidth: 90 }}
+            />
+            <input
+              placeholder="Duration (min)"
+              type="number"
+              value={newService.duration_minutes}
+              onChange={e => setNewService(s => ({ ...s, duration_minutes: e.target.value }))}
+              style={{ flex: 1, minWidth: 110 }}
+            />
+            <button className="btn-primary" onClick={addService}>Add</button>
+            <button className="btn-ghost" onClick={() => setNewService(null)}>Cancel</button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Barbers / Team ── */}
+      <div className="card">
+        <div className="card-header">Your Team</div>
+        <p className="card-note">
+          These names are used by your AI receptionist when customers request a specific barber.
+        </p>
+        <div className="barbers-list">
+          {barbers.map((name, i) => (
+            <div key={i} className="barber-chip">
+              {name}
+              <button
+                className="chip-remove"
+                onClick={() => setBarbers(b => b.filter((_, j) => j !== i))}
+              >×</button>
+            </div>
+          ))}
+          {barbers.length === 0 && (
+            <span style={{ color: '#9ca3af', fontSize: 13 }}>No team members added yet.</span>
+          )}
+        </div>
+        <div className="add-barber-row">
+          <input
+            placeholder="Barber name"
+            value={newBarber}
+            onChange={e => setNewBarber(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && newBarber.trim()) {
+                setBarbers(b => [...b, newBarber.trim()]);
+                setNewBarber('');
+              }
+            }}
+          />
+          <button
+            className="btn-outline"
+            onClick={() => {
+              if (newBarber.trim()) {
+                setBarbers(b => [...b, newBarber.trim()]);
+                setNewBarber('');
+              }
+            }}
+          >
+            Add
+          </button>
+        </div>
+        <div className="save-row">
+          <button className="btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving...' : 'Save Team'}
+          </button>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+// ── Billing Page ──────────────────────────────────────────────────────────────
+function BillingPage() {
+  const [billing, setBilling]     = useState(null);
+  const [loading, setLoading]     = useState(true);
+  const [showModal, setShowModal] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/api/billing')
+      .then(r => r.json())
+      .then(setBilling)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  const cancelSub = async () => {
+    setCancelling(true);
+    try {
+      await apiFetch('/api/billing/cancel', { method: 'POST' });
+      setBilling(b => ({ ...b, subscription_status: 'cancelling' }));
+      setShowModal(false);
+    } catch {}
+    setCancelling(false);
+  };
+
+  if (loading) return <Spinner />;
+
+  const statusMap = {
+    trial:      { color: '#534AB7', label: 'Trial' },
+    trialing:   { color: '#534AB7', label: 'Trial' },
+    active:     { color: '#10b981', label: 'Active' },
+    cancelling: { color: '#f59e0b', label: 'Cancelling' },
+    cancelled:  { color: '#6b7280', label: 'Cancelled' },
+    past_due:   { color: '#ef4444', label: 'Past Due' },
+  };
+
+  const status     = billing?.subscription_status || 'unknown';
+  const statusInfo = statusMap[status] || { color: '#6b7280', label: status };
+
+  const features = [
+    '24/7 AI receptionist answers every call',
+    'Automated SMS confirmations to customers',
+    'Email notifications straight to you',
+    'Google Calendar integration',
+    'Online dashboard & analytics',
+    'Unlimited bookings',
+  ];
+
+  const periodEnd = billing?.current_period_end
+    ? new Date(billing.current_period_end * 1000).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' })
+    : null;
+
+  const trialEnd = billing?.trial_end
+    ? new Date(billing.trial_end * 1000).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' })
+    : null;
+
+  return (
+    <div className="page-content">
+      <div className="card billing-card">
+        <div className="billing-header">
+          <div>
+            <div className="billing-plan">Bimbly Receptionist</div>
+            <div className="billing-amount">CA$49.00 / month</div>
+          </div>
+          <span
+            className="status-badge"
+            style={{ background: statusInfo.color + '20', color: statusInfo.color }}
+          >
+            {statusInfo.label}
+          </span>
+        </div>
+
+        {trialEnd && (
+          <div className="billing-info-row">
+            Trial ends: <strong>{trialEnd}</strong>
+          </div>
+        )}
+        {periodEnd && (
+          <div className="billing-info-row">
+            Next billing date: <strong>{periodEnd}</strong>
+          </div>
+        )}
+
+        <div className="features-list">
+          {features.map((f, i) => (
+            <div key={i} className="feature-item">
+              <span className="feature-check">✓</span>
+              {f}
+            </div>
+          ))}
+        </div>
+
+        {status !== 'cancelled' && status !== 'cancelling' && (
+          <div style={{ padding: '20px 28px' }}>
+            <button className="btn-danger-outline" onClick={() => setShowModal(true)}>
+              Cancel Subscription
+            </button>
+          </div>
+        )}
+        {status === 'cancelling' && (
+          <div style={{ padding: '16px 28px', fontSize: 13, color: '#f59e0b' }}>
+            Your subscription is set to cancel at the end of the billing period.
+          </div>
+        )}
+      </div>
+
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-title">Cancel subscription?</div>
+            <p className="modal-body">
+              Your service will continue until{' '}
+              <strong>{periodEnd || 'the end of the billing period'}</strong>.
+              After that, your AI receptionist will stop answering calls.
+            </p>
+            <div className="modal-actions">
+              <button className="btn-ghost" onClick={() => setShowModal(false)}>
+                Keep Subscription
+              </button>
+              <button className="btn-danger" onClick={cancelSub} disabled={cancelling}>
+                {cancelling ? 'Cancelling...' : 'Yes, Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Onboarding Page ───────────────────────────────────────────────────────────
+function OnboardingPage({ setPage }) {
+  const [step, setStep]   = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [newBarber, setNewBarber] = useState('');
+  const [data, setData]   = useState({
+    name:    '',
+    phone:   '',
+    address: '',
+    ai_name: 'Sarah',
+    business_hours: {},
+    services: [
+      { name: "Men's Haircut",  price: '35', duration_minutes: '30' },
+      { name: 'Beard Trim',     price: '20', duration_minutes: '20' },
+      { name: "Kid's Haircut",  price: '25', duration_minutes: '20' },
+    ],
+    barbers: [],
+  });
+
+  const setField = (key, val) => setData(d => ({ ...d, [key]: val }));
+
+  const updateSvc = (i, key, val) =>
+    setData(d => ({
+      ...d,
+      services: d.services.map((s, j) => j === i ? { ...s, [key]: val } : s),
+    }));
+
+  const removeSvc = i =>
+    setData(d => ({ ...d, services: d.services.filter((_, j) => j !== i) }));
+
+  const addBarber = () => {
+    if (newBarber.trim()) {
+      setData(d => ({ ...d, barbers: [...d.barbers, newBarber.trim()] }));
+      setNewBarber('');
+    }
+  };
+
+  const complete = async () => {
+    setSaving(true);
+    try {
+      await apiFetch('/api/business', {
+        method: 'PUT',
+        body: JSON.stringify({
+          name:           data.name,
+          phone:          data.phone,
+          address:        data.address,
+          ai_name:        data.ai_name,
+          business_hours: data.business_hours,
+          barbers:        data.barbers,
+        }),
+      });
+      for (const svc of data.services) {
+        if (svc.name) {
+          await apiFetch('/api/services', { method: 'POST', body: JSON.stringify(svc) }).catch(() => {});
+        }
+      }
+      setPage('home');
+    } catch {}
+    setSaving(false);
+  };
+
+  return (
+    <div className="onboarding-wrap">
+      <div className="onboarding-card">
+        <div className="step-indicator">
+          {[1, 2, 3, 4].map(s => (
+            <div key={s} className={`step-dot ${s === step ? 'active' : s < step ? 'done' : ''}`}>
+              {s < step ? '✓' : s}
+            </div>
+          ))}
+        </div>
+
+        {/* Step 1 */}
+        {step === 1 && (
+          <div className="step-content">
+            <h2>Let's set up your AI receptionist</h2>
+            <p className="step-sub">Tell us about your business so we can personalize your AI.</p>
+            <div className="form-group">
+              <label>Business Name</label>
+              <input
+                value={data.name}
+                onChange={e => setField('name', e.target.value)}
+                placeholder="Sam's Barbershop"
+              />
+            </div>
+            <div className="form-group">
+              <label>Business Phone</label>
+              <input
+                value={data.phone}
+                onChange={e => setField('phone', e.target.value)}
+                placeholder="+1 (416) 555-0000"
+              />
+            </div>
+            <div className="form-group">
+              <label>Address</label>
+              <input
+                value={data.address}
+                onChange={e => setField('address', e.target.value)}
+                placeholder="123 Main St, Toronto, ON"
+              />
+            </div>
+            <div className="form-group">
+              <label>AI Receptionist Name</label>
+              <input
+                value={data.ai_name}
+                onChange={e => setField('ai_name', e.target.value)}
+                placeholder="Sarah"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Step 2 */}
+        {step === 2 && (
+          <div className="step-content">
+            <h2>What services do you offer?</h2>
+            <p className="step-sub">
+              Add your services so customers can book the right appointment.
+            </p>
+            {data.services.map((svc, i) => (
+              <div key={i} className="svc-row">
+                <input
+                  placeholder="Service name"
+                  value={svc.name}
+                  onChange={e => updateSvc(i, 'name', e.target.value)}
+                />
+                <input
+                  placeholder="$ Price"
+                  type="number"
+                  value={svc.price}
+                  style={{ width: 90 }}
+                  onChange={e => updateSvc(i, 'price', e.target.value)}
+                />
+                <button className="btn-ghost" style={{ height: 40, padding: '0 12px' }} onClick={() => removeSvc(i)}>×</button>
+              </div>
+            ))}
+            <button
+              className="btn-outline"
+              style={{ marginTop: 8 }}
+              onClick={() => setData(d => ({
+                ...d,
+                services: [...d.services, { name: '', price: '', duration_minutes: '30' }],
+              }))}
+            >
+              + Add Service
+            </button>
+          </div>
+        )}
+
+        {/* Step 3 */}
+        {step === 3 && (
+          <div className="step-content">
+            <h2>Who are your barbers?</h2>
+            <p className="step-sub">
+              Customers can request a specific barber when they call.
+            </p>
+            <div className="barbers-list" style={{ marginBottom: 16 }}>
+              {data.barbers.map((name, i) => (
+                <div key={i} className="barber-chip">
+                  {name}
+                  <button
+                    className="chip-remove"
+                    onClick={() => setData(d => ({ ...d, barbers: d.barbers.filter((_, j) => j !== i) }))}
+                  >×</button>
+                </div>
+              ))}
+              {data.barbers.length === 0 && (
+                <span style={{ color: '#9ca3af', fontSize: 13 }}>No barbers added yet.</span>
+              )}
+            </div>
+            <div className="add-barber-row" style={{ padding: 0 }}>
+              <input
+                placeholder="Barber name"
+                value={newBarber}
+                onChange={e => setNewBarber(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addBarber()}
+              />
+              <button className="btn-outline" onClick={addBarber}>Add</button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 4 */}
+        {step === 4 && (
+          <div className="step-content">
+            <h2>You're almost live!</h2>
+            <p className="step-sub">
+              Forward your business phone number to your Bimbly number to start receiving bookings.
+            </p>
+            <div className="forward-box">
+              <div className="forward-label">Your Bimbly Number</div>
+              <div className="forward-number">+1 (647) 000-0000</div>
+            </div>
+            <div className="instructions">
+              <div className="instr-title">iPhone</div>
+              <ol>
+                <li>Go to <strong>Settings → Phone → Call Forwarding</strong></li>
+                <li>Turn on <strong>Call Forwarding</strong></li>
+                <li>Enter your Bimbly number above</li>
+              </ol>
+              <div className="instr-title" style={{ marginTop: 20 }}>Android</div>
+              <ol>
+                <li>Open <strong>Phone app → Settings → Calls</strong></li>
+                <li>Tap <strong>Call forwarding → Always forward</strong></li>
+                <li>Enter your Bimbly number above</li>
+              </ol>
+            </div>
+          </div>
+        )}
+
+        <div className="step-actions">
+          {step > 1 && (
+            <button className="btn-ghost" onClick={() => setStep(s => s - 1)}>Back</button>
+          )}
+          {step < 4 && (
+            <button className="btn-primary" onClick={() => setStep(s => s + 1)}>
+              Continue →
+            </button>
+          )}
+          {step === 4 && (
+            <button className="btn-primary" onClick={complete} disabled={saving}>
+              {saving ? 'Setting up...' : "I've forwarded my number →"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [authed, setAuthed]     = useState(false);
+  const [page, setPage]         = useState('home');
+  const [business, setBusiness] = useState(null);
+
+  useEffect(() => {
+    // Pick up token from URL (sent by OAuth callback)
+    const params   = new URLSearchParams(window.location.search);
+    const urlToken = params.get('token');
+    if (urlToken) {
+      localStorage.setItem('bimbly_token', urlToken);
+      const url = new URL(window.location.href);
+      url.searchParams.delete('token');
+      window.history.replaceState({}, '', url);
+    }
+
+    const token = localStorage.getItem('bimbly_token');
+    if (!token) {
+      window.location.href = API_BASE + '/auth/dashboard/google';
+      return;
+    }
+
+    setAuthed(true);
+
+    apiFetch('/api/business')
+      .then(r => r.json())
+      .then(setBusiness)
+      .catch(() => {});
+  }, []);
+
+  if (!authed) {
+    return (
+      <div className="loading-screen">
+        <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  const titles = {
+    home:        'Dashboard',
+    bookings:    'Bookings',
+    settings:    'Settings',
+    billing:     'Billing',
+    onboarding:  'Setup',
+  };
+
+  return (
+    <div className="app-layout">
+      <Sidebar page={page} setPage={setPage} business={business} />
+      <div className="main-area">
+        <TopBar title={titles[page] || 'Dashboard'} />
+        <div className="content-area">
+          {page === 'home'       && <DashboardHome />}
+          {page === 'bookings'   && <BookingsPage />}
+          {page === 'settings'   && <SettingsPage />}
+          {page === 'billing'    && <BillingPage />}
+          {page === 'onboarding' && <OnboardingPage setPage={setPage} />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
