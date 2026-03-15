@@ -385,20 +385,21 @@ app.get('/signup', (req, res) => {
       display: flex;
       flex-direction: column;
       justify-content: center;
-      padding: 48px 64px;
+      align-items: center;
+      padding: 48px 40px;
       overflow-y: auto;
     }
 
-    .logo {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      text-decoration: none;
-      color: #534AB7;
-      margin-bottom: 40px;
-      display: inline-block;
+    .form-inner {
+      width: 100%;
+      max-width: 480px;
     }
-    .logo span { color: #D85A30; }
+
+    .logo {
+      text-decoration: none;
+      margin-bottom: 40px;
+      display: block;
+    }
 
     h1 {
       font-size: 32px;
@@ -626,15 +627,6 @@ app.get('/signup', (req, res) => {
       gap: 4px;
     }
 
-    .panel-logo {
-      font-size: 22px;
-      font-weight: 700;
-      color: #fff;
-      letter-spacing: -0.5px;
-    }
-
-    .panel-logo span { color: #D85A30; }
-
     .panel-tagline {
       font-size: 13px;
       color: #64748b;
@@ -646,8 +638,9 @@ app.get('/signup', (req, res) => {
 
       .form-panel {
         flex: none;
-        padding: 32px 24px;
+        padding: 32px 20px;
         order: 1;
+        align-items: stretch;
       }
 
       .social-panel {
@@ -662,10 +655,27 @@ app.get('/signup', (req, res) => {
 
   <!-- Left: Form -->
   <div class="form-panel">
-    <a href="https://bimblyai.com" class="logo">bimbly<span>ai</span></a>
+   <div class="form-inner">
+    <a href="https://bimblyai.com" class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" height="48" style="display:block;">
+  <g transform="translate(8, 10)">
+    <path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z"
+          fill="none" stroke="#534AB7" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="42" cy="27" r="8" fill="#534AB7"/>
+    <circle cx="43" cy="28" r="3.5" fill="white"/>
+    <circle cx="82" cy="27" r="8" fill="#534AB7"/>
+    <circle cx="83" cy="28" r="3.5" fill="white"/>
+    <path d="M52 48 Q62 56 72 48" fill="none" stroke="#534AB7" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
+    <line x1="62" y1="14" x2="62" y2="3" stroke="#D85A30" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="62" cy="3" r="6" fill="#D85A30"/>
+  </g>
+  <text x="130" y="58" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="-1">
+    <tspan fill="#534AB7">bimbly</tspan><tspan fill="#D85A30" font-weight="300">ai</tspan>
+  </text>
+  <text x="132" y="80" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" letter-spacing="1.8" fill="#5F5E5A">YOUR BUSINESS, POWERED BY AI</text>
+</svg></a>
 
     <h1>Start your free 30-day trial</h1>
-    <p class="subtext">Set up takes 15 minutes. No credit card stress.</p>
+    <p class="subtext">Set up takes 15 minutes. Your 30-day trial starts today.</p>
 
     <div id="errorBanner" class="error-banner"></div>
 
@@ -715,6 +725,7 @@ app.get('/signup', (req, res) => {
 
     <p class="fine-print">30 days free. Then CA$49/month. Cancel anytime. No setup fees.</p>
     <p class="signin-link">Already have an account? <a href="/dashboard/login">Sign in</a></p>
+   </div>
   </div>
 
   <!-- Right: Social proof -->
@@ -738,8 +749,23 @@ app.get('/signup', (req, res) => {
     </div>
 
     <div class="panel-brand">
-      <div class="panel-logo">bimbly<span>ai</span></div>
-      <div class="panel-tagline">Your business, powered by AI</div>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" height="48" style="display:block;">
+  <g transform="translate(8, 10)">
+    <path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z"
+          fill="none" stroke="#7F77DD" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="42" cy="27" r="8" fill="#7F77DD"/>
+    <circle cx="43" cy="28" r="3.5" fill="white"/>
+    <circle cx="82" cy="27" r="8" fill="#7F77DD"/>
+    <circle cx="83" cy="28" r="3.5" fill="white"/>
+    <path d="M52 48 Q62 56 72 48" fill="none" stroke="#7F77DD" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
+    <line x1="62" y1="14" x2="62" y2="3" stroke="#F0997B" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="62" cy="3" r="6" fill="#F0997B"/>
+  </g>
+  <text x="130" y="58" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="-1">
+    <tspan fill="#AFA9EC">bimbly</tspan><tspan fill="#F0997B" font-weight="300">ai</tspan>
+  </text>
+  <text x="132" y="80" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" letter-spacing="1.8" fill="#5F5E5A">YOUR BUSINESS, POWERED BY AI</text>
+</svg>
     </div>
   </div>
 
