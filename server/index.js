@@ -210,46 +210,43 @@ app.patch('/api/businesses/:businessId', async (req, res) => {
 });
 
 
-// Route to initiate Google Calendar connection
+// Route to initiate Google Calendar connection (legacy — kept for compatibility)
 app.get('/connect-calendar/:businessId', (req, res) => {
   const { businessId } = req.params;
   const authUrl = getAuthUrl(businessId);
   res.redirect(authUrl);
 });
 
-// OAuth callback - Google redirects here after authorization
+// Google OAuth - initiate connection
+app.get('/auth/google', async (req, res) => {
+  const { businessId } = req.query;
+  if (!businessId) return res.status(400).send('Missing businessId');
+
+  const url = getAuthUrl(businessId);
+  res.redirect(url);
+});
+
+// Google OAuth - callback
 app.get('/auth/google/callback', async (req, res) => {
+  const { code, state: businessId } = req.query;
+
   try {
-    const { code, state } = req.query;
-    const businessId = state; // We passed business ID as state
-    
-    // Exchange code for tokens
     const tokens = await getTokensFromCode(code);
-    
-    // Save tokens to database
-    const { error } = await supabase
+
+    await supabase
       .from('businesses')
       .update({
         google_access_token: tokens.access_token,
-        google_refresh_token: tokens.refresh_token,
-        google_token_expiry: new Date(tokens.expiry_date)
+        google_refresh_token: tokens.refresh_token || undefined,
+        google_token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null
       })
       .eq('id', businessId);
-    
-    if (error) throw error;
-    
-    res.send(`
-      <html>
-        <body style="font-family: Arial; padding: 40px; text-align: center;">
-          <h1>✅ Calendar Connected!</h1>
-          <p>Your Google Calendar has been successfully connected to BookingAgent.</p>
-          <p>You can close this window.</p>
-        </body>
-      </html>
-    `);
+
+    console.log('✅ Google Calendar connected for business:', businessId);
+    res.send('✅ Google Calendar connected successfully! You can close this tab.');
   } catch (error) {
-    console.error('OAuth callback error:', error);
-    res.status(500).send('Error connecting calendar');
+    console.error('❌ OAuth callback error:', error);
+    res.status(500).send('Failed to connect Google Calendar. Please try again.');
   }
 });
 
