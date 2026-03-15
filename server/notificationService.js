@@ -65,7 +65,40 @@ Please add this to your calendar.
   }
 }
 
+// Send payment failure email to business owner
+async function sendPaymentFailedEmail(business) {
+  const emailBody = `
+Hi,
+
+Your Bimbly Receptionist payment failed and your subscription is now past due.
+
+To keep your AI receptionist running, please update your payment method by contacting us:
+
+Email: hello@bimblyai.com
+
+If you don't update your payment method, your service will be paused.
+
+— The Bimbly Team
+  `;
+
+  try {
+    const msg = {
+      to: business.email,
+      from: business.email,
+      subject: 'Action required: Bimbly payment failed',
+      text: emailBody
+    };
+    await sgMail.send(msg);
+    console.log(`📧 Payment failed email sent to ${business.email}`);
+    return true;
+  } catch (error) {
+    console.error('Payment failed email error:', error);
+    return false;
+  }
+}
+
 module.exports = {
   sendCustomerSMS,
-  sendOwnerEmail
+  sendOwnerEmail,
+  sendPaymentFailedEmail
 };
