@@ -367,126 +367,305 @@ app.get('/signup', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Start Your Free Trial — Bimbly Receptionist</title>
+  <title>Start Your Free Trial — Bimbly AI Receptionist</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
-      background: #f9fafb;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #ffffff;
       color: #1f2937;
       min-height: 100vh;
       display: flex;
+    }
+
+    /* ── Left panel (form) ── */
+    .form-panel {
+      flex: 0 0 60%;
+      display: flex;
       flex-direction: column;
-      align-items: center;
-      padding: 2rem 1rem;
+      justify-content: center;
+      padding: 48px 64px;
+      overflow-y: auto;
     }
+
     .logo {
-      font-size: 1.5rem;
-      font-weight: 800;
-      color: #534AB7;
+      font-size: 28px;
+      font-weight: 700;
       letter-spacing: -0.5px;
-      margin-bottom: 2rem;
       text-decoration: none;
+      color: #534AB7;
+      margin-bottom: 40px;
+      display: inline-block;
     }
-    .card {
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
-      padding: 2.5rem 2rem;
-      width: 100%;
-      max-width: 480px;
-    }
+    .logo span { color: #D85A30; }
+
     h1 {
-      font-size: 1.75rem;
-      font-weight: 800;
-      color: #1f2937;
+      font-size: 32px;
+      font-weight: 700;
+      color: #111827;
       line-height: 1.2;
-      margin-bottom: 0.5rem;
+      margin-bottom: 10px;
     }
+
     .subtext {
+      font-size: 16px;
       color: #6b7280;
-      font-size: 0.95rem;
+      margin-bottom: 36px;
       line-height: 1.5;
-      margin-bottom: 2rem;
     }
-    .form-group {
-      margin-bottom: 1.25rem;
+
+    .error-banner {
+      display: none;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      border-radius: 100px;
+      padding: 10px 18px;
+      font-size: 14px;
+      margin-bottom: 20px;
+      text-align: center;
     }
+
+    .form-group { margin-bottom: 18px; }
+
     label {
       display: block;
-      font-size: 0.875rem;
+      font-size: 14px;
       font-weight: 600;
       color: #374151;
-      margin-bottom: 0.375rem;
+      margin-bottom: 6px;
     }
+
     input, select {
       width: 100%;
-      padding: 0.65rem 0.875rem;
+      height: 48px;
+      padding: 0 14px;
       border: 1.5px solid #e5e7eb;
-      border-radius: 8px;
-      font-size: 0.95rem;
+      border-radius: 10px;
+      font-size: 15px;
       color: #1f2937;
       background: #fff;
-      transition: border-color 0.15s;
+      transition: border-color 0.15s, box-shadow 0.15s;
       appearance: none;
+      -webkit-appearance: none;
     }
+
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 38px;
+    }
+
     input:focus, select:focus {
       outline: none;
       border-color: #534AB7;
+      box-shadow: 0 0 0 3px rgba(83, 74, 183, 0.12);
     }
-    input.invalid, select.invalid { border-color: #ef4444; }
-    .field-error { display: block; font-size: 0.8rem; color: #ef4444; margin-top: 0.25rem; min-height: 1rem; }
+
+    input.invalid, select.invalid {
+      border-color: #ef4444;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+    }
+
+    .field-error {
+      display: block;
+      font-size: 12px;
+      color: #ef4444;
+      margin-top: 4px;
+      min-height: 16px;
+    }
+
     .btn-submit {
       width: 100%;
-      padding: 0.85rem;
+      height: 52px;
       background: #D85A30;
       color: #fff;
       border: none;
-      border-radius: 8px;
-      font-size: 1rem;
+      border-radius: 10px;
+      font-size: 16px;
       font-weight: 700;
       cursor: pointer;
-      margin-top: 0.5rem;
+      margin-top: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
-      transition: background 0.2s;
+      gap: 8px;
+      transition: background 0.2s, transform 0.1s;
+      letter-spacing: 0.01em;
     }
-    .btn-submit:hover:not(:disabled) { background: #c24e27; }
+
+    .btn-submit:hover:not(:disabled) {
+      background: #c24e27;
+      transform: translateY(-1px);
+    }
+
+    .btn-submit:active:not(:disabled) { transform: translateY(0); }
     .btn-submit:disabled { opacity: 0.7; cursor: not-allowed; }
+
     .spinner {
-      width: 18px; height: 18px;
+      width: 18px;
+      height: 18px;
       border: 2px solid rgba(255,255,255,0.4);
       border-top-color: #fff;
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
       display: none;
     }
+
     @keyframes spin { to { transform: rotate(360deg); } }
+
     .fine-print {
       text-align: center;
-      font-size: 0.8rem;
+      font-size: 13px;
       color: #9ca3af;
-      margin-top: 1rem;
+      margin-top: 14px;
+      line-height: 1.5;
     }
-    .error-banner {
-      display: none;
-      background: #fef2f2;
-      border: 1px solid #fecaca;
-      color: #b91c1c;
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      font-size: 0.875rem;
-      margin-bottom: 1rem;
+
+    .signin-link {
+      text-align: center;
+      font-size: 14px;
+      color: #6b7280;
+      margin-top: 24px;
+    }
+
+    .signin-link a {
+      color: #534AB7;
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .signin-link a:hover { text-decoration: underline; }
+
+    /* ── Right panel (social proof) ── */
+    .social-panel {
+      flex: 0 0 40%;
+      background: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 64px 48px;
+      color: #fff;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .social-panel::before {
+      content: '';
+      position: absolute;
+      top: -80px;
+      right: -80px;
+      width: 300px;
+      height: 300px;
+      background: rgba(83, 74, 183, 0.15);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .quote-mark {
+      font-size: 60px;
+      line-height: 1;
+      color: #D85A30;
+      font-family: Georgia, serif;
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .pull-quote {
+      font-size: 17px;
+      line-height: 1.65;
+      color: #e2e8f0;
+      margin-bottom: 20px;
+      font-style: italic;
+    }
+
+    .attribution {
+      font-size: 14px;
+      color: #94a3b8;
+      font-weight: 600;
+      margin-bottom: 36px;
+    }
+
+    .divider {
+      height: 1px;
+      background: rgba(255,255,255,0.12);
+      margin-bottom: 36px;
+    }
+
+    .stat-pills {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 48px;
+    }
+
+    .stat-pill {
+      background: #fff;
+      color: #1a1a2e;
+      border-radius: 100px;
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      width: fit-content;
+    }
+
+    .stat-pill .stat-value {
+      font-size: 18px;
+      font-weight: 800;
+      color: #534AB7;
+    }
+
+    .panel-brand {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .panel-logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+
+    .panel-logo span { color: #D85A30; }
+
+    .panel-tagline {
+      font-size: 13px;
+      color: #64748b;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      body { flex-direction: column; }
+
+      .form-panel {
+        flex: none;
+        padding: 32px 24px;
+        order: 1;
+      }
+
+      .social-panel {
+        display: none;
+      }
+
+      h1 { font-size: 26px; }
     }
   </style>
 </head>
 <body>
-  <a href="https://bimblyai.com" class="logo">bimblyai</a>
-  <div class="card">
+
+  <!-- Left: Form -->
+  <div class="form-panel">
+    <a href="https://bimblyai.com" class="logo">bimbly<span>ai</span></a>
+
     <h1>Start your free 30-day trial</h1>
-    <p class="subtext">Takes 2 minutes. No credit card stress — your trial is completely free.</p>
+    <p class="subtext">Set up takes 15 minutes. No credit card stress.</p>
 
     <div id="errorBanner" class="error-banner"></div>
 
@@ -496,21 +675,25 @@ app.get('/signup', (req, res) => {
         <input type="text" id="ownerName" name="ownerName" placeholder="Your name" autocomplete="name">
         <span class="field-error" id="ownerNameError"></span>
       </div>
+
       <div class="form-group">
         <label for="businessName">Business Name</label>
         <input type="text" id="businessName" name="businessName" placeholder="Sam's Barbershop" autocomplete="organization">
         <span class="field-error" id="businessNameError"></span>
       </div>
+
       <div class="form-group">
-        <label for="email">Email</label>
-        <input type="email" id="email" name="email" placeholder="your@email.com" autocomplete="email">
+        <label for="email">Email Address</label>
+        <input type="email" id="email" name="email" placeholder="you@yourbusiness.com" autocomplete="email">
         <span class="field-error" id="emailError"></span>
       </div>
+
       <div class="form-group">
         <label for="phone">Phone Number</label>
         <input type="tel" id="phone" name="phone" placeholder="+1 (416) 555-0000" autocomplete="tel">
         <span class="field-error" id="phoneError"></span>
       </div>
+
       <div class="form-group">
         <label for="businessType">Business Type</label>
         <select id="businessType" name="businessType">
@@ -529,7 +712,35 @@ app.get('/signup', (req, res) => {
         <span id="spinner" class="spinner"></span>
       </button>
     </form>
-    <p class="fine-print">30 days free. Then $49/month. Cancel anytime.</p>
+
+    <p class="fine-print">30 days free. Then CA$49/month. Cancel anytime. No setup fees.</p>
+    <p class="signin-link">Already have an account? <a href="/dashboard/login">Sign in</a></p>
+  </div>
+
+  <!-- Right: Social proof -->
+  <div class="social-panel">
+    <span class="quote-mark">"</span>
+    <p class="pull-quote">I used to miss 8–10 calls a day mid-cut. Now every call gets answered and I get a booking notification on my phone. It paid for itself in the first week.</p>
+    <p class="attribution">— Sam, Owner, Metro Cuts Toronto</p>
+
+    <div class="divider"></div>
+
+    <div class="stat-pills">
+      <div class="stat-pill">
+        <span class="stat-value">30+</span> calls captured monthly
+      </div>
+      <div class="stat-pill">
+        <span class="stat-value">40%</span> after-hours bookings
+      </div>
+      <div class="stat-pill">
+        <span class="stat-value">$49/mo</span> all-in pricing
+      </div>
+    </div>
+
+    <div class="panel-brand">
+      <div class="panel-logo">bimbly<span>ai</span></div>
+      <div class="panel-tagline">Your business, powered by AI</div>
+    </div>
   </div>
 
   <script>
@@ -547,7 +758,9 @@ app.get('/signup', (req, res) => {
     }
 
     ['ownerName','businessName','email','phone','businessType'].forEach(id => {
-      document.getElementById(id).addEventListener('input', () => setError(id, id + 'Error', ''));
+      const el = document.getElementById(id);
+      el.addEventListener('input', () => setError(id, id + 'Error', ''));
+      el.addEventListener('change', () => setError(id, id + 'Error', ''));
     });
 
     function validate() {
@@ -555,7 +768,8 @@ app.get('/signup', (req, res) => {
       const v = id => document.getElementById(id).value.trim();
       if (!v('ownerName')) { setError('ownerName','ownerNameError','Please enter your name.'); ok = false; }
       if (!v('businessName')) { setError('businessName','businessNameError','Please enter your business name.'); ok = false; }
-      if (!v('email') || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(v('email'))) { setError('email','emailError','Please enter a valid email.'); ok = false; }
+      const email = v('email');
+      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) { setError('email','emailError','Please enter a valid email address.'); ok = false; }
       if (!v('phone')) { setError('phone','phoneError','Please enter your phone number.'); ok = false; }
       if (!v('businessType')) { setError('businessType','businessTypeError','Please select a business type.'); ok = false; }
       return ok;
@@ -584,9 +798,7 @@ app.get('/signup', (req, res) => {
         });
 
         const data = await res.json();
-
         if (!res.ok) throw new Error(data.error || 'Something went wrong');
-
         window.location.href = data.checkoutUrl;
       } catch (err) {
         errorBanner.textContent = err.message || 'Something went wrong. Please try again or email hello@bimblyai.com';
