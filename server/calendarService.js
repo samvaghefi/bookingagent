@@ -2,6 +2,11 @@ const { google } = require('googleapis');
 const { createClient } = require('@supabase/supabase-js');
 const { DateTime } = require('luxon');
 
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+  console.error('FATAL: SUPABASE_URL or SUPABASE_KEY is not set');
+  process.exit(1);
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
