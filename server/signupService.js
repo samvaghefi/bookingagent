@@ -24,7 +24,14 @@ async function createBusiness(data) {
     .select('id, name, owner_name, email, phone, business_type')
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (error.code === '23505') {
+      const friendly = new Error('An account with this email already exists. Please use a different email or contact hello@bimblyai.com to access your existing account.');
+      friendly.isUserFacing = true;
+      throw friendly;
+    }
+    throw error;
+  }
 
   console.log(`🏪 New business created: ${business.name} ${business.id}`);
   return business;

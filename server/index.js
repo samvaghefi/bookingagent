@@ -609,6 +609,9 @@ app.post('/signup', async (req, res) => {
   try {
     business = await createBusiness({ businessName, ownerName, email, phone, businessType });
   } catch (err) {
+    if (err.isUserFacing) {
+      return res.status(409).json({ error: err.message });
+    }
     console.error('❌ createBusiness failed');
     console.error('  message:', err.message);
     console.error('  code:', err.code);
