@@ -29,6 +29,7 @@ app.get('/', (req, res) => {
 app.post('/webhook/booking', async (req, res) => {
   try {
     console.log('📞 Received booking webhook');
+    console.log('Message type:', req.body?.message?.type);
 
     const message = req.body.message || req.body;
     const messageType = message.type;
