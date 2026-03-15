@@ -10,7 +10,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-const DASHBOARD_URL = `${process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000'}/dashboard`;
+const DASHBOARD_URL = process.env.DASHBOARD_URL || 'https://bimblyai.com/dashboard';
 
 function getDashboardOAuthClient() {
   const base = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';

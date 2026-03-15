@@ -139,6 +139,15 @@ router.get('/api/analytics', async (req, res) => {
       if (s.name) priceMap[s.name.toLowerCase()] = parseFloat(s.price) || 0;
     });
 
+    // Fallback prices when service isn't in the services table
+    function estimateServicePrice(name) {
+      const key = (name || '').toLowerCase().trim();
+      if (priceMap[key] > 0) return priceMap[key];
+      if (key.includes('kid') || key.includes('child')) return 25;
+      if (key.includes('beard')) return 20;
+      return 35; // default (men's haircut or unknown)
+    }
+
     // Partition bookings
     const thisMonthBookings = bookings.filter(b => b.appointment_date >= thisMonthStr && b.appointment_date <= todayStr);
     const lastMonthBookings = bookings.filter(b => b.appointment_date >= lastMonthStr && b.appointment_date < thisMonthStr);
@@ -148,10 +157,9 @@ router.get('/api/analytics', async (req, res) => {
 
     // Revenue estimate this month
     const revenueEstimateThisMonth = thisMonthBookings.reduce((sum, b) => {
-      const serviceRevenue = (b.service_ids || []).reduce((s, name) => {
-        return s + (priceMap[name.toLowerCase()] || 0);
-      }, 0);
-      return sum + serviceRevenue;
+      const services = b.service_ids || [];
+      if (services.length === 0) return sum + 35; // default if no service recorded
+      return sum + services.reduce((s, name) => s + estimateServicePrice(name), 0);
     }, 0);
 
     // Busiest days of week

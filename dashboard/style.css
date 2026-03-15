@@ -44,16 +44,10 @@ body {
 }
 
 .sidebar-logo {
-  padding: 28px 24px 24px;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
+  padding: 20px 20px 18px;
   border-bottom: 1px solid rgba(255,255,255,0.07);
   flex-shrink: 0;
 }
-
-.logo-bimbly { color: #9490d9; }
-.logo-ai     { color: #D85A30; }
 
 .sidebar-nav {
   flex: 1;

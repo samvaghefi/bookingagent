@@ -44,7 +44,22 @@ function Sidebar({ page, setPage, business }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <span className="logo-bimbly">bimbly</span><span className="logo-ai">ai</span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 90" width="180" height="48" style={{display:'block'}}>
+          <g transform="translate(8, 10)">
+            <path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z"
+                  fill="none" stroke="#7F77DD" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <circle cx="42" cy="27" r="8" fill="#7F77DD"/>
+            <circle cx="43" cy="28" r="3.5" fill="white"/>
+            <circle cx="82" cy="27" r="8" fill="#7F77DD"/>
+            <circle cx="83" cy="28" r="3.5" fill="white"/>
+            <path d="M52 48 Q62 56 72 48" fill="none" stroke="#7F77DD" strokeWidth="2.5" strokeLinecap="round" opacity="0.5"/>
+            <line x1="62" y1="14" x2="62" y2="3" stroke="#F0997B" strokeWidth="3" strokeLinecap="round"/>
+            <circle cx="62" cy="3" r="6" fill="#F0997B"/>
+          </g>
+          <text x="130" y="58" fontFamily="'Helvetica Neue', Helvetica, Arial, sans-serif" fontSize="34" fontWeight="700" letterSpacing="-1">
+            <tspan fill="#AFA9EC">bimbly</tspan><tspan fill="#F0997B" fontWeight="300">ai</tspan>
+          </text>
+        </svg>
       </div>
       <nav className="sidebar-nav">
         {navItems.map(item => (
@@ -955,7 +970,7 @@ function App() {
 
     apiFetch('/api/business')
       .then(r => r.json())
-      .then(setBusiness)
+      .then(data => setBusiness(data.business || data))
       .catch(() => {});
   }, []);
 
