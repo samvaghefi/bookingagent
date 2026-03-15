@@ -2,10 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const { extractFromToolCall, extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
-const { sendCustomerSMS, sendOwnerEmail, sendPaymentFailedEmail } = require('./notificationService');
+const { sendCustomerSMS, sendOwnerEmail, sendWelcomeEmail, sendInternalSignupNotification, sendPaymentFailedEmail } = require('./notificationService');
 const { getAuthUrl, getTokensFromCode, createCalendarEvent } = require('./calendarService');
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { createCheckoutSession } = require('./billingService');
+const { createBusiness } = require('./signupService');
 
 const app = express();
 
@@ -38,9 +39,22 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
         await supabase.from('businesses').update({
           stripe_customer_id: session.customer,
           stripe_subscription_id: session.subscription,
-          subscription_status: 'active'
+          subscription_status: 'trial',
+          is_active: true
         }).eq('id', businessId);
-        console.log(`✅ Subscription activated for business: ${businessId}`);
+        console.log(`✅ Trial activated for business: ${businessId}`);
+
+        // Fetch business details for welcome emails
+        const { data: business } = await supabase
+          .from('businesses')
+          .select('id, name, owner_name, email, phone, business_type')
+          .eq('id', businessId)
+          .single();
+
+        if (business) {
+          await sendWelcomeEmail(business);
+          await sendInternalSignupNotification(business);
+        }
       }
     }
 
@@ -337,6 +351,267 @@ app.get('/auth/google/callback', async (req, res) => {
 });
 
 
+
+// ── Signup routes ──────────────────────────────────────────────────────────
+
+// GET /signup — self-serve signup page
+app.get('/signup', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Start Your Free Trial — Bimbly Receptionist</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      background: #f9fafb;
+      color: #1f2937;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #534AB7;
+      letter-spacing: -0.5px;
+      margin-bottom: 2rem;
+      text-decoration: none;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.08);
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 480px;
+    }
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 800;
+      color: #1f2937;
+      line-height: 1.2;
+      margin-bottom: 0.5rem;
+    }
+    .subtext {
+      color: #6b7280;
+      font-size: 0.95rem;
+      line-height: 1.5;
+      margin-bottom: 2rem;
+    }
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+    label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 0.375rem;
+    }
+    input, select {
+      width: 100%;
+      padding: 0.65rem 0.875rem;
+      border: 1.5px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      color: #1f2937;
+      background: #fff;
+      transition: border-color 0.15s;
+      appearance: none;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #534AB7;
+    }
+    input.invalid, select.invalid { border-color: #ef4444; }
+    .field-error { display: block; font-size: 0.8rem; color: #ef4444; margin-top: 0.25rem; min-height: 1rem; }
+    .btn-submit {
+      width: 100%;
+      padding: 0.85rem;
+      background: #D85A30;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: background 0.2s;
+    }
+    .btn-submit:hover:not(:disabled) { background: #c24e27; }
+    .btn-submit:disabled { opacity: 0.7; cursor: not-allowed; }
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: none;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .fine-print {
+      text-align: center;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      margin-top: 1rem;
+    }
+    .error-banner {
+      display: none;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <a href="https://bimblyai.com" class="logo">bimblyai</a>
+  <div class="card">
+    <h1>Start your free 30-day trial</h1>
+    <p class="subtext">Takes 2 minutes. No credit card stress — your trial is completely free.</p>
+
+    <div id="errorBanner" class="error-banner"></div>
+
+    <form id="signupForm" novalidate>
+      <div class="form-group">
+        <label for="ownerName">Full Name</label>
+        <input type="text" id="ownerName" name="ownerName" placeholder="Your name" autocomplete="name">
+        <span class="field-error" id="ownerNameError"></span>
+      </div>
+      <div class="form-group">
+        <label for="businessName">Business Name</label>
+        <input type="text" id="businessName" name="businessName" placeholder="Sam's Barbershop" autocomplete="organization">
+        <span class="field-error" id="businessNameError"></span>
+      </div>
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="your@email.com" autocomplete="email">
+        <span class="field-error" id="emailError"></span>
+      </div>
+      <div class="form-group">
+        <label for="phone">Phone Number</label>
+        <input type="tel" id="phone" name="phone" placeholder="+1 (416) 555-0000" autocomplete="tel">
+        <span class="field-error" id="phoneError"></span>
+      </div>
+      <div class="form-group">
+        <label for="businessType">Business Type</label>
+        <select id="businessType" name="businessType">
+          <option value="">Select your business type</option>
+          <option value="barbershop">Barbershop</option>
+          <option value="hair-salon">Hair Salon</option>
+          <option value="nail-salon">Nail Salon</option>
+          <option value="spa">Spa</option>
+          <option value="other">Other</option>
+        </select>
+        <span class="field-error" id="businessTypeError"></span>
+      </div>
+
+      <button type="submit" id="submitBtn" class="btn-submit">
+        <span id="submitText">Start My Free Trial →</span>
+        <span id="spinner" class="spinner"></span>
+      </button>
+    </form>
+    <p class="fine-print">30 days free. Then $49/month. Cancel anytime.</p>
+  </div>
+
+  <script>
+    const form = document.getElementById('signupForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const submitText = document.getElementById('submitText');
+    const spinner = document.getElementById('spinner');
+    const errorBanner = document.getElementById('errorBanner');
+
+    function setError(inputId, errorId, msg) {
+      const el = document.getElementById(inputId);
+      const err = document.getElementById(errorId);
+      if (msg) { el.classList.add('invalid'); err.textContent = msg; }
+      else { el.classList.remove('invalid'); err.textContent = ''; }
+    }
+
+    ['ownerName','businessName','email','phone','businessType'].forEach(id => {
+      document.getElementById(id).addEventListener('input', () => setError(id, id + 'Error', ''));
+    });
+
+    function validate() {
+      let ok = true;
+      const v = id => document.getElementById(id).value.trim();
+      if (!v('ownerName')) { setError('ownerName','ownerNameError','Please enter your name.'); ok = false; }
+      if (!v('businessName')) { setError('businessName','businessNameError','Please enter your business name.'); ok = false; }
+      if (!v('email') || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(v('email'))) { setError('email','emailError','Please enter a valid email.'); ok = false; }
+      if (!v('phone')) { setError('phone','phoneError','Please enter your phone number.'); ok = false; }
+      if (!v('businessType')) { setError('businessType','businessTypeError','Please select a business type.'); ok = false; }
+      return ok;
+    }
+
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+      errorBanner.style.display = 'none';
+      if (!validate()) return;
+
+      submitBtn.disabled = true;
+      submitText.textContent = 'Setting up your account...';
+      spinner.style.display = 'inline-block';
+
+      try {
+        const res = await fetch('/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ownerName: document.getElementById('ownerName').value.trim(),
+            businessName: document.getElementById('businessName').value.trim(),
+            email: document.getElementById('email').value.trim(),
+            phone: document.getElementById('phone').value.trim(),
+            businessType: document.getElementById('businessType').value
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || 'Something went wrong');
+
+        window.location.href = data.checkoutUrl;
+      } catch (err) {
+        errorBanner.textContent = err.message || 'Something went wrong. Please try again or email hello@bimblyai.com';
+        errorBanner.style.display = 'block';
+        submitBtn.disabled = false;
+        submitText.textContent = 'Start My Free Trial →';
+        spinner.style.display = 'none';
+      }
+    });
+  </script>
+</body>
+</html>`);
+});
+
+// POST /signup — create business and return Stripe checkout URL
+app.post('/signup', async (req, res) => {
+  const { businessName, ownerName, email, phone, businessType } = req.body;
+
+  if (!businessName || !ownerName || !email || !phone || !businessType) {
+    return res.status(400).json({ error: 'All fields are required.' });
+  }
+
+  try {
+    const business = await createBusiness({ businessName, ownerName, email, phone, businessType });
+    const session = await createCheckoutSession(business.id, email);
+    res.json({ checkoutUrl: session.url });
+  } catch (err) {
+    console.error('❌ Signup error:', err);
+    res.status(500).json({ error: 'Failed to create account. Please try again.' });
+  }
+});
 
 // ── Billing routes ─────────────────────────────────────────────────────────
 

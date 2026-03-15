@@ -20,11 +20,12 @@ Sam's Barbershop, Toronto
 - Hosting: Render (https://bookingagent-gmo2.onrender.com)
 
 ## Key Files
-- server/index.js — main webhook handler, branches on message.type; billing routes
+- server/index.js — webhook handler, signup routes, billing routes
 - server/bookingService.js — extractFromToolCall(), saveBooking(), findBusiness()
 - server/calendarService.js — Google Calendar event creation, OAuth flow
-- server/notificationService.js — SMS, email, and payment failure notifications
+- server/notificationService.js — SMS, email, welcome, internal notification, payment failure
 - server/billingService.js — Stripe customer, subscription, and checkout session helpers
+- server/signupService.js — createBusiness() for self-serve onboarding
 - vapi-system-prompt.txt — AI assistant prompt (paste into Vapi manually)
 
 ## Webhook Flow
@@ -54,6 +55,12 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - Tokens stored per business in businesses table
 - To reconnect: https://bookingagent-gmo2.onrender.com/auth/google?businessId=a09fdd0b-421e-479a-b4d7-120f6a72a043
 
+## Self-Serve Signup Flow
+- GET /signup — branded HTML signup form (name, business name, email, phone, business type)
+- POST /signup — validates fields, calls createBusiness(), creates Stripe Checkout Session, returns { checkoutUrl }
+- On checkout complete (Stripe webhook): sets is_active=true, subscription_status="trial", sends welcome email to owner + internal notification to hello@bimblyai.com
+- signupService.js inserts into businesses table with ai_name="Sarah", is_active=false until payment confirmed
+
 ## Stripe Billing
 - GET /billing/checkout?businessId=xxx — creates Stripe Checkout Session, redirects to Stripe hosted page
 - POST /billing/webhook — handles Stripe events (raw body required for sig verification)
@@ -71,7 +78,9 @@ ALTER TABLE businesses
   ADD COLUMN IF NOT EXISTS stripe_subscription_id text,
   ADD COLUMN IF NOT EXISTS subscription_status text DEFAULT 'inactive',
   ADD COLUMN IF NOT EXISTS trial_ends_at timestamptz,
-  ADD COLUMN IF NOT EXISTS billing_email text;
+  ADD COLUMN IF NOT EXISTS billing_email text,
+  ADD COLUMN IF NOT EXISTS owner_name text,
+  ADD COLUMN IF NOT EXISTS business_type text;
 ```
 
 ## Deploy Workflow
@@ -83,9 +92,9 @@ Pushing to main auto-deploys to Render.
 
 ## Next Priorities
 1. Fix Vapi system prompt to use {{currentDateTime}} for accurate date handling
-2. Build admin dashboard for self-serve business onboarding
-3. Run Supabase SQL migration to add Stripe columns (see above)
-4. Create webhook endpoint in Stripe Dashboard and set STRIPE_WEBHOOK_SECRET in Render
+2. Run Supabase SQL migration to add new columns (see above)
+3. Create webhook endpoint in Stripe Dashboard and set STRIPE_WEBHOOK_SECRET in Render
+4. Verify hello@bimblyai.com as a SendGrid sender domain for welcome/internal emails
 
 ## Known Issues
 - System prompt has hardcoded date — needs {{currentDateTime}} variable
