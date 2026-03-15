@@ -116,16 +116,6 @@ router.get('/auth/dashboard/login', (req, res) => {
       max-width: 400px;
       text-align: center;
     }
-    .logo {
-      font-size: 26px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      color: #534AB7;
-      text-decoration: none;
-      display: inline-block;
-      margin-bottom: 32px;
-    }
-    .logo span { color: #D85A30; }
     h1 {
       font-size: 24px;
       font-weight: 700;
@@ -177,7 +167,21 @@ router.get('/auth/dashboard/login', (req, res) => {
 </head>
 <body>
   <div class="card">
-    <a href="https://bimblyai.com" class="logo">bimbly<span>ai</span></a>
+    <a href="https://bimblyai.com"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 90" width="200" height="54" style="display:block;margin:0 auto 24px;">
+  <g transform="translate(8, 10)">
+    <path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z" fill="none" stroke="#534AB7" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="42" cy="27" r="8" fill="#534AB7"/>
+    <circle cx="43" cy="28" r="3.5" fill="white"/>
+    <circle cx="82" cy="27" r="8" fill="#534AB7"/>
+    <circle cx="83" cy="28" r="3.5" fill="white"/>
+    <path d="M52 48 Q62 56 72 48" fill="none" stroke="#534AB7" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
+    <line x1="62" y1="14" x2="62" y2="3" stroke="#D85A30" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="62" cy="3" r="6" fill="#D85A30"/>
+  </g>
+  <text x="130" y="58" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="-1">
+    <tspan fill="#534AB7">bimbly</tspan><tspan fill="#D85A30" font-weight="300">ai</tspan>
+  </text>
+</svg></a>
     <h1>Welcome back</h1>
     <p class="subtext">Sign in to your Bimbly dashboard</p>
     ${req.query.error ? `<div class="error-msg">${{

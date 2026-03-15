@@ -44,6 +44,7 @@ function Sidebar({ page, setPage, business }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
+        <a href="https://bimblyai.com" style={{display:'block'}}>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 90" width="180" height="48" style={{display:'block'}}>
           <g transform="translate(8, 10)">
             <path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z"
@@ -60,6 +61,7 @@ function Sidebar({ page, setPage, business }) {
             <tspan fill="#AFA9EC">bimbly</tspan><tspan fill="#F0997B" fontWeight="300">ai</tspan>
           </text>
         </svg>
+        </a>
       </div>
       <nav className="sidebar-nav">
         {navItems.map(item => (
