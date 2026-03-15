@@ -10,8 +10,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-const COOKIE_NAME = 'bimbly_session';
-const COOKIE_MAX_AGE = 7 * 24 * 60 * 60 * 1000; // 7 days
+const DASHBOARD_URL = 'https://bimblyai.com/dashboard';
 
 function getDashboardOAuthClient() {
   const base = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
@@ -39,10 +38,9 @@ router.get('/auth/dashboard/google', (req, res) => {
 // GET /auth/dashboard/callback — handle Google OAuth callback
 router.get('/auth/dashboard/callback', async (req, res) => {
   const { code, state } = req.query;
-  const base = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
 
   if (state !== 'dashboard') {
-    return res.redirect(`${base}/dashboard/login?error=invalid_state`);
+    return res.redirect(`${DASHBOARD_URL}/login?error=invalid_state`);
   }
 
   try {
@@ -56,7 +54,7 @@ router.get('/auth/dashboard/callback', async (req, res) => {
     const email = userInfo.email;
 
     if (!email) {
-      return res.redirect(`${base}/dashboard/login?error=no_email`);
+      return res.redirect(`${DASHBOARD_URL}/login?error=no_email`);
     }
 
     // Look up business by email
@@ -68,38 +66,144 @@ router.get('/auth/dashboard/callback', async (req, res) => {
 
     if (error || !business) {
       console.log(`⚠️  Dashboard login attempt for unknown email: ${email}`);
-      return res.redirect(`${base}/dashboard/login?error=no_account`);
+      return res.redirect(`${DASHBOARD_URL}/login?error=no_account`);
     }
 
-    // Create JWT session token
+    // Create JWT — React app reads this from URL and stores in localStorage
     const token = jwt.sign(
       { businessId: business.id, email: business.email },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    // Set session cookie
-    res.cookie(COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: COOKIE_MAX_AGE
-    });
-
     console.log(`✅ Dashboard login: ${business.name} (${email})`);
-    res.redirect(`${base}/dashboard`);
+    res.redirect(`${DASHBOARD_URL}?token=${token}`);
   } catch (err) {
     console.error('❌ Dashboard OAuth callback error:', err.message);
-    const base = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
-    res.redirect(`${base}/dashboard/login?error=auth_failed`);
+    res.redirect(`${DASHBOARD_URL}/login?error=auth_failed`);
   }
 });
 
-// GET /auth/logout — clear session and redirect to login
-router.get('/auth/logout', (req, res) => {
-  res.clearCookie(COOKIE_NAME);
+// GET /auth/dashboard/login — branded login page
+router.get('/auth/dashboard/login', (req, res) => {
   const base = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
-  res.redirect(`${base}/dashboard/login`);
+  const googleAuthUrl = `${base}/auth/dashboard/google`;
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in — Bimbly Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f9fafb;
+      color: #1f2937;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+    .logo {
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #534AB7;
+      text-decoration: none;
+      display: inline-block;
+      margin-bottom: 32px;
+    }
+    .logo span { color: #D85A30; }
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 8px;
+    }
+    .subtext {
+      font-size: 15px;
+      color: #6b7280;
+      margin-bottom: 32px;
+      line-height: 1.5;
+    }
+    .error-msg {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
+    .btn-google {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      width: 100%;
+      height: 48px;
+      background: #fff;
+      color: #1f2937;
+      border: 1.5px solid #534AB7;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+    .btn-google:hover {
+      background: #f5f4ff;
+      box-shadow: 0 2px 8px rgba(83,74,183,0.15);
+    }
+    .fine-print {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 24px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <a href="https://bimblyai.com" class="logo">bimbly<span>ai</span></a>
+    <h1>Welcome back</h1>
+    <p class="subtext">Sign in to your Bimbly dashboard</p>
+    ${req.query.error ? `<div class="error-msg">${{
+      no_account: "No account found for that email. <a href='https://bimblyai.com/contact.html'>Contact us</a> for help.",
+      auth_failed: 'Authentication failed. Please try again.',
+      no_email:    'Could not retrieve your email from Google. Please try again.',
+      invalid_state: 'Invalid request. Please try again.'
+    }[req.query.error] || 'Something went wrong. Please try again.'}</div>` : ''}
+    <a href="${googleAuthUrl}" class="btn-google">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+        <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+        <path d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" fill="#FBBC05"/>
+        <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z" fill="#EA4335"/>
+      </svg>
+      Sign in with Google
+    </a>
+    <p class="fine-print">Only works with the email address on your Bimbly account.</p>
+  </div>
+</body>
+</html>`);
+});
+
+// GET /auth/logout — redirect to dashboard login
+router.get('/auth/logout', (req, res) => {
+  res.redirect(`${DASHBOARD_URL}/login`);
 });
 
 module.exports = router;

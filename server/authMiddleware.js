@@ -20,6 +20,7 @@ const SKIP_PATHS = [
   '/auth/google/callback',
   '/auth/dashboard/google',
   '/auth/dashboard/callback',
+  '/auth/dashboard/login',
   '/auth/logout',
   '/api/businesses',   // legacy internal endpoints (secured at network level)
 ];
