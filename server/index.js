@@ -7,6 +7,9 @@ const { getAuthUrl, getTokensFromCode, createCalendarEvent } = require('./calend
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { createCheckoutSession } = require('./billingService');
 const { createBusiness } = require('./signupService');
+const cookieParser = require('cookie-parser');
+const dashboardRoutes = require('./dashboardRoutes');
+const authRoutes = require('./authRoutes');
 
 const app = express();
 
@@ -109,6 +112,9 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 });
 
 app.use(express.json());
+app.use(cookieParser());
+app.use(authRoutes);
+app.use(dashboardRoutes);
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -705,5 +711,8 @@ app.listen(PORT, () => {
   console.log('Node version:', process.version);
   if (!process.env.STRIPE_WEBHOOK_SECRET) {
     console.warn('⚠️  STRIPE_WEBHOOK_SECRET is not set — webhook signature verification disabled. Set this after configuring the webhook in the Stripe dashboard.');
+  }
+  if (!process.env.JWT_SECRET) {
+    console.warn('⚠️  JWT_SECRET is not set — dashboard authentication will fail. Set this in Render environment variables.');
   }
 });

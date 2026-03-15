@@ -26,6 +26,9 @@ Sam's Barbershop, Toronto
 - server/notificationService.js — SMS, email, welcome, internal notification, payment failure
 - server/billingService.js — Stripe customer, subscription, and checkout session helpers
 - server/signupService.js — createBusiness() for self-serve onboarding
+- server/authMiddleware.js — JWT cookie auth for /api/* routes
+- server/authRoutes.js — Google OAuth for dashboard login + logout
+- server/dashboardRoutes.js — protected /api/* endpoints for dashboard
 - vapi-system-prompt.txt — AI assistant prompt (paste into Vapi manually)
 
 ## Webhook Flow
@@ -48,12 +51,33 @@ Sam's Barbershop, Toronto
 - services — service menu per business
 
 ## Environment Variables (set in Render)
-SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, NODE_ENV, STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET
+SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, NODE_ENV, STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET, JWT_SECRET, RENDER_EXTERNAL_URL
 
 ## Google Calendar
 - OAuth flow: GET /auth/google?businessId=xxx → Google login → /auth/google/callback
 - Tokens stored per business in businesses table
 - To reconnect: https://bookingagent-gmo2.onrender.com/auth/google?businessId=a09fdd0b-421e-479a-b4d7-120f6a72a043
+
+## Dashboard Auth
+- Login: GET /auth/dashboard/google → Google OAuth (email + profile scope) → /auth/dashboard/callback
+- Callback looks up business by email, creates JWT (7d), sets httpOnly cookie `bimbly_session`
+- If no matching business: redirect to /dashboard/login?error=no_account
+- Logout: GET /auth/logout → clears cookie, redirects to /dashboard/login
+- All /api/* routes require valid JWT cookie (authMiddleware.js)
+- JWT payload: { businessId, email } — signed with JWT_SECRET
+- Add /auth/dashboard/callback to Google OAuth Console authorized redirect URIs
+
+## Dashboard API Endpoints (all require auth)
+- GET  /api/business — business details (no tokens/secrets)
+- PUT  /api/business — update name, phone, address, business_hours, ai_name
+- GET  /api/bookings — bookings with optional ?date=, ?from=&to=, ?limit= (default: last 30 days)
+- GET  /api/analytics — totalBookingsThisMonth/LastMonth, todayBookings, upcomingBookings, revenueEstimate, busiestDays, popularServices, peakHours, bookingsByWeek
+- GET  /api/services — all services for the business
+- POST /api/services — create service { name, price, duration_minutes, description }
+- PUT  /api/services/:id — update service (ownership verified)
+- DELETE /api/services/:id — delete service (ownership verified)
+- GET  /api/billing — live subscription info from Stripe
+- POST /api/billing/cancel — cancel subscription at period end
 
 ## Self-Serve Signup Flow
 - GET /signup — branded HTML signup form (name, business name, email, phone, business type)
@@ -95,6 +119,9 @@ Pushing to main auto-deploys to Render.
 2. Run Supabase SQL migration to add new columns (see above)
 3. Create webhook endpoint in Stripe Dashboard and set STRIPE_WEBHOOK_SECRET in Render
 4. Verify hello@bimblyai.com as a SendGrid sender domain for welcome/internal emails
+5. Add JWT_SECRET to Render env vars (any long random string)
+6. Add /auth/dashboard/callback to Google OAuth Console authorized redirect URIs
+7. Build dashboard frontend that consumes /api/* endpoints
 
 ## Known Issues
 - System prompt has hardcoded date — needs {{currentDateTime}} variable

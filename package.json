@@ -16,9 +16,12 @@
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",
     "@supabase/supabase-js": "^2.97.0",
+    "cookie-parser": "^1.4.7",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "express-session": "^1.19.0",
     "googleapis": "^171.4.0",
+    "jsonwebtoken": "^9.0.3",
     "luxon": "^3.7.2",
     "stripe": "^20.4.1",
     "twilio": "^5.12.2"
