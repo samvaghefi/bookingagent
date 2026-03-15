@@ -599,17 +599,34 @@ app.get('/signup', (req, res) => {
 app.post('/signup', async (req, res) => {
   const { businessName, ownerName, email, phone, businessType } = req.body;
 
+  console.log('📝 Signup attempt:', { businessName, ownerName, email, phone, businessType });
+
   if (!businessName || !ownerName || !email || !phone || !businessType) {
     return res.status(400).json({ error: 'All fields are required.' });
   }
 
+  let business;
   try {
-    const business = await createBusiness({ businessName, ownerName, email, phone, businessType });
+    business = await createBusiness({ businessName, ownerName, email, phone, businessType });
+  } catch (err) {
+    console.error('❌ createBusiness failed');
+    console.error('  message:', err.message);
+    console.error('  code:', err.code);
+    console.error('  details:', err.details);
+    console.error('  hint:', err.hint);
+    console.error('  stack:', err.stack);
+    return res.status(500).json({ error: 'Failed to create account. Please try again.' });
+  }
+
+  try {
     const session = await createCheckoutSession(business.id, email);
     res.json({ checkoutUrl: session.url });
   } catch (err) {
-    console.error('❌ Signup error:', err);
-    res.status(500).json({ error: 'Failed to create account. Please try again.' });
+    console.error('❌ createCheckoutSession failed for business:', business.id);
+    console.error('  message:', err.message);
+    console.error('  type:', err.type);
+    console.error('  stack:', err.stack);
+    return res.status(500).json({ error: 'Failed to create checkout session. Please try again.' });
   }
 });
 
