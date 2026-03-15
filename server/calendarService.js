@@ -65,6 +65,24 @@ async function createCalendarEvent(business, booking) {
       refresh_token: business.google_refresh_token
     });
 
+    oauth2Client.on('tokens', async (tokens) => {
+      console.log('🔄 Google token refreshed');
+      if (tokens.refresh_token) {
+        // Update refresh token in database
+        await supabase
+          .from('businesses')
+          .update({
+            google_access_token: tokens.access_token,
+            google_token_expiry: new Date(tokens.expiry_date).toISOString()
+          })
+          .eq('id', business.id);
+        console.log('✅ Updated tokens in database');
+      }
+    });
+
+    await oauth2Client.getAccessToken();
+    console.log('✅ Access token refreshed successfully');
+
     // Initialize Calendar API
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
