@@ -39,39 +39,43 @@ async function getTokensFromCode(code) {
 // Create calendar event
 async function createCalendarEvent(business, booking) {
   try {
+    console.log('📅 Attempting to create calendar event for booking:', booking.id);
+
     // Check if business has connected their calendar
     if (!business.google_access_token || !business.google_refresh_token) {
-      console.log('⚠️  Business has not connected Google Calendar');
+      console.log('⚠️  Business has not connected Google Calendar — skipping calendar event');
+      console.log('   Access token present:', !!business.google_access_token);
+      console.log('   Refresh token present:', !!business.google_refresh_token);
       return null;
     }
-    
+
+    console.log('   Refresh token present: yes');
+    console.log('   Access token present: yes');
+    console.log('   Token expiry:', business.google_token_expiry || 'not stored');
+
     // Set up OAuth client with stored tokens
     const oauth2Client = getOAuthClient();
     oauth2Client.setCredentials({
       access_token: business.google_access_token,
       refresh_token: business.google_refresh_token
     });
-    
+
     // Initialize Calendar API
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-    
-// Parse date and time - database already has ISO format
-// booking.appointment_date is already "2026-02-25"
-// booking.appointment_time is already "18:00:00"
 
-const dateTimeString = `${booking.appointment_date}T${booking.appointment_time}`;
-const appointmentDateTime = DateTime.fromISO(dateTimeString, { zone: 'America/Toronto' });
+    // Parse date and time - database already has ISO format
+    const dateTimeString = `${booking.appointment_date}T${booking.appointment_time}`;
+    console.log('   Parsing date/time string:', dateTimeString);
+    const appointmentDateTime = DateTime.fromISO(dateTimeString, { zone: 'America/Toronto' });
 
-// Check if valid
-if (!appointmentDateTime.isValid) {
-  console.error('Invalid date/time:', appointmentDateTime.invalidReason);
-  console.error('Attempted to parse:', dateTimeString);
-  return null;
-}
+    if (!appointmentDateTime.isValid) {
+      console.error('❌ Invalid date/time:', appointmentDateTime.invalidReason);
+      console.error('   Attempted to parse:', dateTimeString);
+      return null;
+    }
 
-// Calculate end time
-const endDateTime = appointmentDateTime.plus({ minutes: booking.duration_minutes || 30 });
-
+    // Calculate end time
+    const endDateTime = appointmentDateTime.plus({ minutes: booking.duration_minutes || 30 });
 
     // Create event
     const event = {
@@ -81,44 +85,58 @@ Customer: ${booking.customer_name}
 Phone: ${booking.customer_phone}
 Service: ${booking.service_ids.join(' & ')}
 Special Requests: ${booking.special_requests || 'None'}
+Preferred Barber: ${booking.preferred_barber || 'No preference'}
+New Customer: ${booking.is_new_customer ? 'Yes' : 'No'}
 
 Booked via BookingAgent
       `.trim(),
       start: {
-  dateTime: appointmentDateTime.toISO(),
-  timeZone: 'America/Toronto'
-},
-end: {
-  dateTime: endDateTime.toISO(),
-  timeZone: 'America/Toronto'
-},
+        dateTime: appointmentDateTime.toISO(),
+        timeZone: 'America/Toronto'
+      },
+      end: {
+        dateTime: endDateTime.toISO(),
+        timeZone: 'America/Toronto'
+      },
       attendees: booking.customer_email ? [{ email: booking.customer_email }] : [],
       reminders: {
         useDefault: false,
         overrides: [
-          { method: 'email', minutes: 24 * 60 }, // 1 day before
+          { method: 'email', minutes: 24 * 60 },
           { method: 'popup', minutes: 30 }
         ]
       }
     };
-    
+
+    console.log('   Event details:', JSON.stringify({
+      summary: event.summary,
+      start: event.start,
+      end: event.end
+    }, null, 2));
+
     const response = await calendar.events.insert({
       calendarId: 'primary',
       resource: event
     });
-    
+
     console.log('📅 Calendar event created:', response.data.id);
-    
+
     // Update booking with calendar event ID
     await supabase
       .from('bookings')
       .update({ google_calendar_event_id: response.data.id })
       .eq('id', booking.id);
-    
+
     return response.data.id;
-    
+
   } catch (error) {
     console.error('❌ Calendar error:', error.message);
+    if (error.response?.data) {
+      console.error('   Google API response:', JSON.stringify(error.response.data, null, 2));
+    }
+    if (error.message?.includes('invalid_grant') || error.message?.includes('Token has been expired')) {
+      console.error('   ⚠️  Google token is expired or revoked — business needs to reconnect calendar');
+    }
     return null;
   }
 }

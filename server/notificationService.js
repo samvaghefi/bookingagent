@@ -36,10 +36,14 @@ New Booking at ${business.name}!
 
 Customer: ${booking.customer_name}
 Phone: ${booking.customer_phone}
+Callback Number: ${booking.callback_number || booking.customer_phone}
 Service: ${booking.service_ids.join(' and ')}
+Service Count: ${booking.service_count || 1}
 Date: ${booking.appointment_date}
 Time: ${booking.appointment_time}
 Special Requests: ${booking.special_requests || 'None'}
+Preferred Barber: ${booking.preferred_barber || 'No preference'}
+New Customer: ${booking.is_new_customer ? 'Yes' : 'No'}
 
 Please add this to your calendar.
   `;
