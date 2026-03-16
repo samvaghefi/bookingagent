@@ -312,9 +312,10 @@ function SettingsPage() {
       apiFetch('/api/services').then(r => r.json()),
     ])
       .then(([b, s]) => {
-        setBusiness(b);
+        const biz = b.business || b;
+        setBusiness(biz);
         setServices(s.services || s || []);
-        setBarbers(b.barbers || []);
+        setBarbers(biz.barbers || []);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
