@@ -302,7 +302,9 @@ function SettingsPage() {
   const [saveMsg, setSaveMsg]     = useState('');
   const [newService, setNewService] = useState(null);
   const [barbers, setBarbers]     = useState([]);
-  const [newBarber, setNewBarber] = useState('');
+  const [newBarber, setNewBarber]   = useState('');
+  const [recordSaving, setRecordSaving] = useState(false);
+  const [recordMsg, setRecordMsg]       = useState('');
 
   useEffect(() => {
     Promise.all([
@@ -339,6 +341,24 @@ function SettingsPage() {
       setSaveMsg('Failed to save.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRecordingToggle = async (enabled) => {
+    setRecordSaving(true);
+    setRecordMsg('');
+    try {
+      await apiFetch('/api/business/recording', {
+        method: 'PUT',
+        body: JSON.stringify({ enabled }),
+      });
+      setBusiness(b => ({ ...b, call_recording_enabled: enabled }));
+      setRecordMsg('Recording setting updated');
+      setTimeout(() => setRecordMsg(''), 2500);
+    } catch {
+      setRecordMsg('Failed to update recording setting.');
+    } finally {
+      setRecordSaving(false);
     }
   };
 
@@ -581,6 +601,47 @@ function SettingsPage() {
         </div>
       </div>
 
+      {/* ── AI Agent Settings ── */}
+      <div className="card">
+        <div className="card-header">AI Agent Settings</div>
+
+        <div className="settings-grid">
+          <div className="form-group full-width">
+            <label>Call Recording</label>
+            <label className="toggle-label">
+              <input
+                type="checkbox"
+                checked={!!business?.call_recording_enabled}
+                disabled={recordSaving}
+                onChange={e => handleRecordingToggle(e.target.checked)}
+              />
+              <span className="toggle-text">Record calls for quality purposes</span>
+            </label>
+            {recordMsg && (
+              <span className={`save-msg ${recordMsg.includes('updated') ? 'success' : 'error'}`} style={{ display: 'block', marginTop: 6 }}>
+                {recordMsg}
+              </span>
+            )}
+          </div>
+
+          <div className="form-group full-width">
+            <label>Supported Languages</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+              {(business?.supported_languages || ['en']).map(code => {
+                const names = { en: 'English', fa: 'Farsi', ko: 'Korean' };
+                return (
+                  <span key={code} className="status-badge" style={{ background: '#ede9fe', color: '#534AB7', fontWeight: 600, fontSize: 13 }}>
+                    {names[code] || code}
+                  </span>
+                );
+              })}
+            </div>
+            <p className="card-note" style={{ marginTop: 8 }}>Configured by Bimbly. Contact support to change supported languages.</p>
+          </div>
+        </div>
+      </div>
+
+
     </div>
   );
 }
@@ -719,7 +780,6 @@ function BillingPage() {
 function OnboardingPage({ setPage }) {
   const [step, setStep]   = useState(1);
   const [saving, setSaving] = useState(false);
-  const [newBarber, setNewBarber] = useState('');
   const [data, setData]   = useState({
     name:    '',
     phone:   '',

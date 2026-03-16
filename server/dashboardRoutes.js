@@ -24,7 +24,7 @@ router.get('/api/business', async (req, res) => {
         'id', 'name', 'owner_name', 'email', 'phone', 'address',
         'business_hours', 'ai_name', 'business_type', 'billing_email',
         'subscription_status', 'trial_ends_at', 'stripe_customer_id',
-        'stripe_subscription_id', 'is_active', 'created_at'
+        'stripe_subscription_id', 'is_active', 'created_at', 'call_recording_enabled', 'supported_languages'
       ].join(', '))
       .eq('id', req.business.id)
       .single();
@@ -367,3 +367,59 @@ router.post('/api/billing/cancel', async (req, res) => {
 });
 
 module.exports = router;
+
+// ── Call Recording Toggle ─────────────────────────────────────────────────────
+
+// PUT /api/business/recording — toggle call recording on/off
+router.put('/api/business/recording', async (req, res) => {
+  const { enabled } = req.body;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ error: 'enabled must be a boolean.' });
+  }
+
+  try {
+    // 1. Get business to find vapi_assistant_id
+    const { data: business, error: fetchError } = await supabase
+      .from('businesses')
+      .select('id, vapi_assistant_id')
+      .eq('id', req.business.id)
+      .single();
+
+    if (fetchError) throw fetchError;
+
+    // 2. Update Supabase
+    const { error: updateError } = await supabase
+      .from('businesses')
+      .update({ call_recording_enabled: enabled })
+      .eq('id', req.business.id);
+
+    if (updateError) throw updateError;
+
+    // 3. Update Vapi assistant if we have an assistant ID
+    if (business.vapi_assistant_id) {
+      const vapiRes = await fetch(`https://api.vapi.ai/assistant/${business.vapi_assistant_id}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${process.env.VAPI_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          artifactPlan: {
+            recordingEnabled: enabled
+          }
+        })
+      });
+
+      if (!vapiRes.ok) {
+        const vapiErr = await vapiRes.text();
+        console.error('Vapi update error:', vapiErr);
+        // Don't fail the whole request — Supabase is updated, log the Vapi error
+      }
+    }
+
+    res.json({ success: true, call_recording_enabled: enabled });
+  } catch (err) {
+    console.error('PUT /api/business/recording error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
