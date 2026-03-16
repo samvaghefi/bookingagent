@@ -608,15 +608,19 @@ function SettingsPage() {
         <div className="settings-grid">
           <div className="form-group full-width">
             <label>Call Recording</label>
-            <label className="toggle-label">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
               <input
                 type="checkbox"
+                id="recordingToggle"
                 checked={!!business?.call_recording_enabled}
                 disabled={recordSaving}
                 onChange={e => handleRecordingToggle(e.target.checked)}
+                style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#534AB7' }}
               />
-              <span className="toggle-text">Record calls for quality purposes</span>
-            </label>
+              <label htmlFor="recordingToggle" style={{ margin: 0, fontWeight: 400, fontSize: 14, color: '#374151', cursor: 'pointer' }}>
+                Record calls for quality purposes
+              </label>
+            </div>
             {recordMsg && (
               <span className={`save-msg ${recordMsg.includes('updated') ? 'success' : 'error'}`} style={{ display: 'block', marginTop: 6 }}>
                 {recordMsg}
