@@ -65,9 +65,10 @@ Sam's Barbershop, Toronto
 SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, NODE_ENV, STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY, STRIPE_STARTER_PRICE_ID, STRIPE_PRO_PRICE_ID, STRIPE_PRICE_ID (legacy fallback), STRIPE_WEBHOOK_SECRET, JWT_SECRET, RENDER_EXTERNAL_URL
 
 ## Pricing Tiers
-- Starter: CA$79/mo — STRIPE_STARTER_PRICE_ID=price_1TBNPdLxC6AbeQxJ94QT68W8
-- Pro:     CA$149/mo — STRIPE_PRO_PRICE_ID=price_1TBNRFLxC6AbeQxJPjyyMZZx
-- plan field stored on businesses table ('starter' | 'pro', default 'starter')
+- Solo:    CA$39/mo  — STRIPE_SOLO_PRICE_ID (set in Render env vars)
+- Starter: CA$99/mo  — STRIPE_STARTER_PRICE_ID (set in Render env vars)
+- Pro:     CA$199/mo — STRIPE_PRO_PRICE_ID (set in Render env vars)
+- plan field stored on businesses table ('solo' | 'starter' | 'pro', default 'solo')
 - createCheckoutSession(businessId, email, plan) selects the correct Stripe price ID
 - plan is stored in Stripe session metadata as a fallback
 

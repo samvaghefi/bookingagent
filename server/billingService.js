@@ -38,11 +38,12 @@ async function getSubscription(subscriptionId) {
 }
 
 // Create a Stripe Checkout Session for self-serve signup
-// plan: 'starter' | 'pro' (defaults to 'starter')
-async function createCheckoutSession(businessId, businessEmail, plan = 'starter') {
-  const priceId = plan === 'pro'
-    ? process.env.STRIPE_PRO_PRICE_ID
-    : (process.env.STRIPE_STARTER_PRICE_ID || process.env.STRIPE_PRICE_ID);
+// plan: 'solo' | 'starter' | 'pro' (defaults to 'solo')
+async function createCheckoutSession(businessId, businessEmail, plan = 'solo') {
+  const priceId =
+    plan === 'pro'      ? process.env.STRIPE_PRO_PRICE_ID :
+    plan === 'starter'  ? process.env.STRIPE_STARTER_PRICE_ID :
+    (process.env.STRIPE_SOLO_PRICE_ID || process.env.STRIPE_PRICE_ID);
 
   if (!priceId) throw new Error(`No Stripe price ID configured for plan: ${plan}`);
 

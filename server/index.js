@@ -873,7 +873,7 @@ app.get('/signup', (req, res) => {
 
 // POST /signup — create business and return Stripe checkout URL
 app.post('/signup', async (req, res) => {
-  const { businessName, ownerName, email, phone, businessType, plan = 'starter' } = req.body;
+  const { businessName, ownerName, email, phone, businessType, plan = 'solo' } = req.body;
 
   console.log('📝 Signup attempt:', { businessName, ownerName, email, phone, businessType, plan });
 

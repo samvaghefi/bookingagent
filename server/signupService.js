@@ -6,8 +6,8 @@ const supabase = createClient(
 );
 
 async function createBusiness(data) {
-  const { businessName, ownerName, email, phone, businessType, plan = 'starter' } = data;
-  const validPlan = plan === 'pro' ? 'pro' : 'starter';
+  const { businessName, ownerName, email, phone, businessType, plan = 'solo' } = data;
+  const validPlan = ['solo', 'starter', 'pro'].includes(plan) ? plan : 'solo';
 
   const { data: business, error } = await supabase
     .from('businesses')
