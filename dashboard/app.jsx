@@ -305,6 +305,7 @@ function SettingsPage() {
   const [newBarber, setNewBarber]   = useState('');
   const [recordSaving, setRecordSaving] = useState(false);
   const [recordMsg, setRecordMsg]       = useState('');
+  const recordDebounceRef = useRef(null);
 
   useEffect(() => {
     Promise.all([
@@ -345,22 +346,26 @@ function SettingsPage() {
     }
   };
 
-  const handleRecordingToggle = async (enabled) => {
-    setRecordSaving(true);
-    setRecordMsg('');
-    try {
-      await apiFetch('/api/business/recording', {
-        method: 'PUT',
-        body: JSON.stringify({ enabled }),
-      });
-      setBusiness(b => ({ ...b, call_recording_enabled: enabled }));
-      setRecordMsg('Recording setting updated');
-      setTimeout(() => setRecordMsg(''), 2500);
-    } catch {
-      setRecordMsg('Failed to update recording setting.');
-    } finally {
-      setRecordSaving(false);
-    }
+  const handleRecordingToggle = (enabled) => {
+    setBusiness(b => ({ ...b, call_recording_enabled: enabled }));
+    clearTimeout(recordDebounceRef.current);
+    recordDebounceRef.current = setTimeout(async () => {
+      setRecordSaving(true);
+      setRecordMsg('');
+      try {
+        await apiFetch('/api/business/recording', {
+          method: 'PUT',
+          body: JSON.stringify({ enabled }),
+        });
+        setRecordMsg('Recording setting updated');
+        setTimeout(() => setRecordMsg(''), 2500);
+      } catch {
+        setRecordMsg('Failed to update recording setting.');
+        setBusiness(b => ({ ...b, call_recording_enabled: !enabled }));
+      } finally {
+        setRecordSaving(false);
+      }
+    }, 500);
   };
 
   const addService = async () => {

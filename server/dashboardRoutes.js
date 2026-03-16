@@ -413,7 +413,7 @@ router.put('/api/business/recording', async (req, res) => {
       if (!vapiRes.ok) {
         const vapiErr = await vapiRes.text();
         console.error('Vapi update error:', vapiErr);
-        // Don't fail the whole request — Supabase is updated, log the Vapi error
+        return res.status(500).json({ error: 'Vapi update failed: ' + vapiErr });
       }
     }
 
