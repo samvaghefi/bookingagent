@@ -1149,6 +1149,8 @@ app.post('/admin/test-provisioning', express.json(), async (req, res) => {
     phone        = '+14165550001',
     businessType = 'barbershop',
     plan         = 'solo',
+    city         = 'Toronto',
+    province     = 'ON',
     cleanup      = false,
   } = req.body || {};
 

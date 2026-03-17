@@ -78,6 +78,8 @@ else
       \"phone\": \"+14165550001\",
       \"businessType\": \"barbershop\",
       \"plan\": \"solo\",
+      \"city\": \"Toronto\",
+      \"province\": \"ON\",
       \"cleanup\": true
     }")
   echo "Response: $RESULT"
