@@ -58,7 +58,8 @@ router.post('/intel/login', (req, res) => {
     submittedPass: (password || '').substring(0, 3),
     bodyKeys: Object.keys(req.body || {}),
     contentType: req.headers['content-type'],
-    match: username === process.env.INTEL_USERNAME && password === process.env.INTEL_PASSWORD,
+    match: username.trim() === (process.env.INTEL_USERNAME || '').trim() &&
+    password.trim() === (process.env.INTEL_PASSWORD || '').trim(),
   });
   if (
     username === process.env.INTEL_USERNAME &&
