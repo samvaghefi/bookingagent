@@ -741,29 +741,42 @@ function BillingPage() {
     ? new Date(billing.trial_end * 1000).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' })
     : null;
 
+  const UPGRADE_FEATURES = {
+    solo:    ['Walk-in waitlist management', 'No-show deposit collection', 'Full analytics dashboard', 'Up to 4 team members'],
+    starter: ['Unlimited team members', 'Priority support', 'Advanced multi-location analytics', 'Custom AI voice & persona'],
+  };
+
   return (
     <div className="page-content">
       {/* Current plan card */}
       <div className="card billing-card">
         <div className="billing-header">
           <div>
-            <div className="billing-plan">Bimbly {planLabel}</div>
-            <div className="billing-amount">{displayPrice ? `${displayPrice} / month` : 'No active subscription'}</div>
+            <div className="billing-plan" style={{ fontSize: 22, fontWeight: 800, color: '#1f2937', marginBottom: 2 }}>
+              Bimbly {planLabel}
+            </div>
+            <div className="billing-amount" style={{ fontSize: 28, fontWeight: 700, color: '#534AB7' }}>
+              {displayAmount != null ? `CA$${Number(displayAmount).toFixed(0)}` : '—'}
+              <span style={{ fontSize: 15, fontWeight: 400, color: '#6b7280' }}> / month</span>
+            </div>
+            {isTrial && (
+              <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>after trial ends</div>
+            )}
           </div>
           <span
             className="status-badge"
-            style={{ background: statusInfo.color + '20', color: statusInfo.color }}
+            style={{ background: statusInfo.color + '20', color: statusInfo.color, alignSelf: 'flex-start' }}
           >
             {statusInfo.label}
           </span>
         </div>
 
-        {trialEnd && (
-          <div className="billing-info-row">
-            Trial ends: <strong>{trialEnd}</strong>
+        {isTrial && trialEnd && (
+          <div className="billing-info-row" style={{ background: '#f3f0ff', borderRadius: 8, padding: '10px 16px', margin: '0 28px 16px', fontSize: 13 }}>
+            🎉 Your free trial ends <strong>{trialEnd}</strong> — no action needed, you'll be billed automatically.
           </div>
         )}
-        {periodEnd && (
+        {periodEnd && !isTrial && (
           <div className="billing-info-row">
             Next billing date: <strong>{periodEnd}</strong>
           </div>
@@ -798,17 +811,21 @@ function BillingPage() {
 
       {/* Upgrade card */}
       {upgradeInfo && (
-        <div className="card" style={{ marginTop: 16, border: '1.5px solid #ede9fe' }}>
-          <div style={{ padding: '24px 28px' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#534AB7', textTransform: 'uppercase', marginBottom: 6 }}>Upgrade Available</div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#1f2937', marginBottom: 4 }}>
-              Upgrade to {upgradeInfo.label} — {upgradeInfo.price}
+        <div style={{ marginTop: 20, background: '#F3F0FF', borderRadius: 12, padding: '24px 28px' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: '#534AB7', textTransform: 'uppercase', marginBottom: 8 }}>Ready to grow?</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#1f2937', marginBottom: 4 }}>
+                {upgradeInfo.label} <span style={{ color: '#534AB7' }}>{upgradeInfo.price}</span>
+              </div>
+              <ul style={{ margin: '10px 0 0', padding: '0 0 0 18px', fontSize: 13, color: '#374151', lineHeight: 1.8 }}>
+                {(UPGRADE_FEATURES[plan] || []).map((f, i) => <li key={i}>{f}</li>)}
+              </ul>
             </div>
-            <p style={{ fontSize: 14, color: '#6b7280', margin: '0 0 20px' }}>{upgradeInfo.desc}</p>
             <a
               href={`/billing/checkout?businessId=${business?.id}&plan=${upgradeInfo.to}`}
               className="btn-primary"
-              style={{ display: 'inline-block', textDecoration: 'none' }}
+              style={{ display: 'inline-block', textDecoration: 'none', alignSelf: 'center', whiteSpace: 'nowrap' }}
             >
               Upgrade Now
             </a>
@@ -942,15 +959,16 @@ function OnboardingPage({ setPage }) {
     setData(d => ({ ...d, services: SERVICE_DEFAULTS[d.business_type] || SERVICE_DEFAULTS['Barbershop'] }));
   }, [data.business_type]);
 
-  // Fetch actual business phone for Step 4
+  // Fetch actual business phone for the final step (step 3 for solo, step 4 for others)
   useEffect(() => {
-    if (step === 4) {
+    const lastStep = plan === 'solo' ? 3 : 4;
+    if (step === lastStep) {
       apiFetch('/api/business')
         .then(r => r.json())
         .then(res => setBizPhone((res.business || res).phone || null))
         .catch(() => {});
     }
-  }, [step]);
+  }, [step, plan]);
 
   const updateSvc = (i, key, val) =>
     setData(d => ({
@@ -984,6 +1002,7 @@ function OnboardingPage({ setPage }) {
           barbers:        data.barbers,
         }),
       });
+      console.log('[complete] data.services to save:', JSON.stringify(data.services));
       await apiFetch('/api/services/replace', {
         method: 'PUT',
         body: JSON.stringify({ services: data.services }),
