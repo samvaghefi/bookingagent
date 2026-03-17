@@ -761,7 +761,7 @@ function BillingPage() {
     <div className="page-content">
       <style>{`@media(max-width:768px){.billing-row{flex-direction:column!important;}}`}</style>
 
-      <div className="billing-row" style={{ display: 'flex', gap: 24, alignItems: 'stretch' }}>
+      <div className="billing-row" style={{ display: 'flex', gap: 24, alignItems: 'stretch', maxWidth: 900, margin: '0 auto' }}>
 
         {/* Left: Current plan card */}
         <div style={CARD_STYLE}>

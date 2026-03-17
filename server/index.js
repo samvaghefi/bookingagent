@@ -912,24 +912,27 @@ app.post('/signup', async (req, res) => {
 
 // ── Billing routes ─────────────────────────────────────────────────────────
 
-// GET /billing/checkout?businessId=xxx
+// GET /billing/checkout?businessId=xxx&plan=solo|starter|pro
 // Creates a Stripe Checkout Session and redirects to Stripe hosted page
 app.get('/billing/checkout', async (req, res) => {
-  const { businessId } = req.query;
+  const { businessId, plan } = req.query;
   if (!businessId) return res.status(400).send('Missing businessId');
 
   try {
     const { data: business, error } = await supabase
       .from('businesses')
-      .select('id, email, billing_email')
+      .select('id, email, billing_email, plan')
       .eq('id', businessId)
       .single();
 
     if (error || !business) return res.status(404).send('Business not found');
 
+    // Use plan from query param (upgrade flow), fall back to business's current plan
+    const checkoutPlan = plan || business.plan || 'solo';
     const session = await createCheckoutSession(
       businessId,
-      business.billing_email || business.email
+      business.billing_email || business.email,
+      checkoutPlan
     );
     res.redirect(303, session.url);
   } catch (err) {
