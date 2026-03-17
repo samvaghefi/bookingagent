@@ -354,7 +354,7 @@ function buildHtml(allResults, analysis, isFirstRun, date, briefOnly = false) {
 
   if (briefOnly) {
     return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:16px;background:#f8fafc;">
-      <div style="background:#1e293b;padding:20px 24px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;">
+      <div style="background:#1e293b;padding:20px 24px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;width:100%;box-sizing:border-box;">
         <img src="https://bimblyai.com/assets/bimblyai-logo-primary.svg" alt="bimblyai" style="height:64px;display:block;">
         <span style="font-size:13px;color:#9ca3af;">${today}</span>
       </div>
@@ -378,7 +378,7 @@ function buildHtml(allResults, analysis, isFirstRun, date, briefOnly = false) {
 
       r.news.forEach(n => {
         const pub = n.pubDate ? new Date(n.pubDate).toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Toronto' }) : '';
-        badges.push('<span style="background:#dbeafe;color:#1d4ed8;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;">News</span>');
+        badges.push('<span style="background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;border-radius:999px;font-size:11px;font-weight:600;padding:2px 10px;display:inline-block;letter-spacing:0.03em;">News</span>');
         items.push(`<div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f1f5f9;">
           <a href="${n.link}" style="color:#111827;text-decoration:none;font-size:14px;font-weight:600;">${n.title}</a>
           <div style="font-size:12px;color:#6b7280;margin-top:4px;">${n.source} &middot; ${pub}</div>
@@ -386,7 +386,7 @@ function buildHtml(allResults, analysis, isFirstRun, date, briefOnly = false) {
       });
 
       if (r.pricingChange) {
-        badges.push('<span style="background:#ffedd5;color:#c2410c;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;">Pricing Change</span>');
+        badges.push('<span style="background:#eff6ff;color:#2563eb;border:1px solid #bfdbfe;border-radius:999px;font-size:11px;font-weight:600;padding:2px 10px;display:inline-block;letter-spacing:0.03em;">Pricing Change</span>');
         items.push(`<div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f1f5f9;">
           <div style="font-size:13px;font-weight:600;color:#111827;">Pricing page changed</div>
           ${r.pricingChange.newText ? `<div style="font-size:11px;color:#6b7280;margin-top:4px;font-family:monospace;background:#f9fafb;padding:6px;border-radius:4px;overflow:hidden;max-height:60px;">${r.pricingChange.newText.slice(0, 200).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>` : ''}
@@ -394,7 +394,7 @@ function buildHtml(allResults, analysis, isFirstRun, date, briefOnly = false) {
       }
 
       if (r.mainChange) {
-        badges.push('<span style="background:#f3f4f6;color:#4b5563;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;">Site Change</span>');
+        badges.push('<span style="background:#fdf4ff;color:#9333ea;border:1px solid #e9d5ff;border-radius:999px;font-size:11px;font-weight:600;padding:2px 10px;display:inline-block;letter-spacing:0.03em;">Site Change</span>');
         items.push(`<div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f1f5f9;">
           <div style="font-size:13px;font-weight:600;color:#111827;">Main site content changed</div>
           ${r.mainChange.newText ? `<div style="font-size:11px;color:#6b7280;margin-top:4px;font-family:monospace;background:#f9fafb;padding:6px;border-radius:4px;overflow:hidden;max-height:60px;">${r.mainChange.newText.slice(0, 200).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>` : ''}
@@ -403,8 +403,8 @@ function buildHtml(allResults, analysis, isFirstRun, date, briefOnly = false) {
 
       const uniqueBadges = [...new Set(badges)];
       return `<div style="border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-bottom:16px;background:#fff;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:6px;">
-          <div style="font-size:16px;font-weight:700;color:#111827;border-bottom:2px solid #e5e7eb;padding-bottom:8px;margin-bottom:12px;">${r.name}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #e5e7eb;padding-bottom:10px;margin-bottom:12px;flex-wrap:wrap;gap:6px;">
+          <div style="font-size:16px;font-weight:700;color:#111827;">${r.name}</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">${uniqueBadges.join('')}</div>
         </div>
         ${items.join('')}
@@ -416,7 +416,7 @@ function buildHtml(allResults, analysis, isFirstRun, date, briefOnly = false) {
     : '';
 
   return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:16px;background:#f8fafc;">
-    <div style="background:#1e293b;padding:20px 24px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;">
+    <div style="background:#1e293b;padding:20px 24px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;width:100%;box-sizing:border-box;">
       <img src="https://bimblyai.com/assets/bimblyai-logo-primary.svg" alt="bimblyai" style="height:64px;display:block;">
       <span style="font-size:13px;color:#9ca3af;">${today}${isFirstRun ? ' (Baseline)' : ''}</span>
     </div>
@@ -523,6 +523,7 @@ async function run() {
   let analysis = null;
   let emailSent = false;
   let pdfPath = null;
+  let reportHtml = null;
 
   if (shouldSend) {
     // AI analysis
@@ -571,6 +572,7 @@ async function run() {
     // Save HTML for local inspection
     const htmlOutputPath = path.join(__dirname, 'last-report.html');
     fs.writeFileSync(htmlOutputPath, html);
+    reportHtml = html;
     console.log(`[html] Report saved to ${htmlOutputPath}`);
 
     if (process.env.DRY_RUN === 'true') {
@@ -597,11 +599,16 @@ async function run() {
     return `${r.name}: ${parts.join(', ') || 'no changes'}`;
   }).join(' | ');
 
+  // Migration required — run once in Supabase SQL editor:
+  // ALTER TABLE competitor_report_log ADD COLUMN IF NOT EXISTS report_html text;
+  // ALTER TABLE competitor_report_log ADD COLUMN IF NOT EXISTS urgent_flag text;
   const { error: logError } = await supabase.from('competitor_report_log').insert({
     run_date: todayStr(),
     changes_detected: totalChanges,
     email_sent: emailSent,
     report_summary: reportSummary.slice(0, 2000),
+    report_html: reportHtml || null,
+    urgent_flag: (analysis && analysis.urgentFlag) ? analysis.urgentFlag : null,
   });
 
   if (logError) console.error('[db] Failed to log run:', logError.message);
