@@ -321,19 +321,23 @@ router.get('/api/billing', async (req, res) => {
       subscription_status: subscription_status || 'inactive',
       trial_end: trial_ends_at ? Math.floor(new Date(trial_ends_at).getTime() / 1000) : null,
       current_period_end: null,
-      amount: 49,
+      amount: null,
       currency: 'CAD',
       cancel_at_period_end: false
     });
   }
 
   try {
-    const sub = await stripe.subscriptions.retrieve(stripe_subscription_id);
+    const sub = await stripe.subscriptions.retrieve(stripe_subscription_id, {
+      expand: ['items.data.price']
+    });
+    const unitAmount = sub.items?.data?.[0]?.price?.unit_amount;
+    const amount = unitAmount != null ? unitAmount / 100 : null;
     res.json({
       subscription_status: subscription_status,
       trial_end: sub.trial_end || null,
       current_period_end: sub.current_period_end || null,
-      amount: 49,
+      amount,
       currency: 'CAD',
       cancel_at_period_end: sub.cancel_at_period_end
     });

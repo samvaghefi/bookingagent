@@ -659,15 +659,21 @@ function SettingsPage() {
 
 // ── Billing Page ──────────────────────────────────────────────────────────────
 function BillingPage() {
-  const [billing, setBilling]     = useState(null);
-  const [loading, setLoading]     = useState(true);
-  const [showModal, setShowModal] = useState(false);
+  const [billing, setBilling]       = useState(null);
+  const [business, setBusiness]     = useState(null);
+  const [loading, setLoading]       = useState(true);
+  const [showModal, setShowModal]   = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
-    apiFetch('/api/billing')
-      .then(r => r.json())
-      .then(setBilling)
+    Promise.all([
+      apiFetch('/api/billing').then(r => r.json()),
+      apiFetch('/api/business').then(r => r.json()),
+    ])
+      .then(([bil, biz]) => {
+        setBilling(bil);
+        setBusiness(biz.business || biz);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -691,10 +697,30 @@ function BillingPage() {
     cancelling: { color: '#f59e0b', label: 'Cancelling' },
     cancelled:  { color: '#6b7280', label: 'Cancelled' },
     past_due:   { color: '#ef4444', label: 'Past Due' },
+    pending:    { color: '#9ca3af', label: 'Pending' },
   };
 
-  const status     = billing?.subscription_status || 'unknown';
-  const statusInfo = statusMap[status] || { color: '#6b7280', label: status };
+  const PLAN_LABELS = {
+    solo:    'Solo',
+    starter: 'Starter',
+    pro:     'Pro',
+  };
+
+  const UPGRADE_INFO = {
+    solo:    { to: 'starter', label: 'Starter', price: '$99/mo', desc: 'Unlock walk-in waitlist, no-show deposits, and full analytics for up to 4 barbers.' },
+    starter: { to: 'pro',     label: 'Pro',     price: '$199/mo', desc: 'Unlimited barbers, priority support, and advanced analytics.' },
+    pro:     null,
+  };
+
+  const status      = billing?.subscription_status || 'unknown';
+  const statusInfo  = statusMap[status] || { color: '#6b7280', label: status };
+  const plan        = business?.plan || 'solo';
+  const planLabel   = PLAN_LABELS[plan] || plan;
+  const upgradeInfo = UPGRADE_INFO[plan];
+  // Use the real amount from Stripe (grandfathers old pricing), fall back to plan defaults only if no subscription yet
+  const PLAN_DEFAULT_PRICE = { solo: 39, starter: 99, pro: 199 };
+  const displayAmount = billing?.amount != null ? billing.amount : (PLAN_DEFAULT_PRICE[plan] || null);
+  const displayPrice  = displayAmount != null ? `CA$${displayAmount.toFixed(2)}` : '';
 
   const features = [
     '24/7 AI receptionist answers every call',
@@ -715,11 +741,12 @@ function BillingPage() {
 
   return (
     <div className="page-content">
+      {/* Current plan card */}
       <div className="card billing-card">
         <div className="billing-header">
           <div>
-            <div className="billing-plan">Bimbly Receptionist</div>
-            <div className="billing-amount">CA$49.00 / month</div>
+            <div className="billing-plan">Bimbly {planLabel}</div>
+            <div className="billing-amount">{displayPrice ? `${displayPrice} / month` : 'No active subscription'}</div>
           </div>
           <span
             className="status-badge"
@@ -749,19 +776,50 @@ function BillingPage() {
           ))}
         </div>
 
-        {status !== 'cancelled' && status !== 'cancelling' && (
-          <div style={{ padding: '20px 28px' }}>
-            <button className="btn-danger-outline" onClick={() => setShowModal(true)}>
-              Cancel Subscription
-            </button>
-          </div>
-        )}
         {status === 'cancelling' && (
           <div style={{ padding: '16px 28px', fontSize: 13, color: '#f59e0b' }}>
             Your subscription is set to cancel at the end of the billing period.
           </div>
         )}
+
+        {status !== 'cancelled' && status !== 'cancelling' && (
+          <div style={{ padding: '8px 28px 20px', textAlign: 'right' }}>
+            <button
+              style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
+              onClick={() => setShowModal(true)}
+            >
+              Cancel subscription
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Upgrade card */}
+      {upgradeInfo && (
+        <div className="card" style={{ marginTop: 16, border: '1.5px solid #ede9fe' }}>
+          <div style={{ padding: '24px 28px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#534AB7', textTransform: 'uppercase', marginBottom: 6 }}>Upgrade Available</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#1f2937', marginBottom: 4 }}>
+              Upgrade to {upgradeInfo.label} — {upgradeInfo.price}
+            </div>
+            <p style={{ fontSize: 14, color: '#6b7280', margin: '0 0 20px' }}>{upgradeInfo.desc}</p>
+            <a
+              href={`/billing/checkout?businessId=${business?.id}&plan=${upgradeInfo.to}`}
+              className="btn-primary"
+              style={{ display: 'inline-block', textDecoration: 'none' }}
+            >
+              Upgrade Now
+            </a>
+          </div>
+        </div>
+      )}
+
+      {plan === 'pro' && (
+        <div className="card" style={{ marginTop: 16, textAlign: 'center', padding: '24px 28px' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#10b981', marginBottom: 4 }}>You're on our best plan.</div>
+          <div style={{ fontSize: 14, color: '#6b7280' }}>Thank you for being a Pro member!</div>
+        </div>
+      )}
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
@@ -853,17 +911,17 @@ function OnboardingPage({ setPage }) {
         const biz = b.business || b;
         const svcs = s.services || s || [];
         const bizType = BIZ_TYPE_MAP[(biz.business_type || '').toLowerCase()] || biz.business_type || 'Barbershop';
-        setData(d => ({
-          ...d,
-          name:          biz.name          || d.name,
-          phone:         biz.phone         || d.phone,
-          address:       biz.address       || d.address,
-          ai_name:       biz.ai_name       || d.ai_name,
-          business_type: bizType,
-          timezone:      biz.timezone      || d.timezone,
-          barbers:       biz.barbers       || d.barbers,
-          services:      svcs.length > 0 ? svcs : (SERVICE_DEFAULTS[bizType] || SERVICE_DEFAULTS['Barbershop']),
-        }));
+        setData({
+          name:           biz.name          || '',
+          phone:          biz.phone         || '',
+          address:        biz.address       || '',
+          ai_name:        biz.ai_name       || 'Sarah',
+          business_type:  bizType,
+          timezone:       biz.timezone      || 'America/Toronto',
+          business_hours: biz.business_hours || {},
+          barbers:        biz.barbers        || [],
+          services:       svcs.length > 0 ? svcs : (SERVICE_DEFAULTS[bizType] || SERVICE_DEFAULTS['Barbershop']),
+        });
       })
       .catch(() => {})
       .finally(() => setLoadingData(false));
