@@ -496,7 +496,7 @@ app.get('/signup', (req, res) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Start Your Free Trial — Bimbly AI Receptionist</title>
+  <title>Start Your Free Trial — bimblyai</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -508,7 +508,6 @@ app.get('/signup', (req, res) => {
       display: flex;
     }
 
-    /* ── Left panel (form) ── */
     .form-panel {
       flex: 0 0 60%;
       display: flex;
@@ -519,31 +518,13 @@ app.get('/signup', (req, res) => {
       overflow-y: auto;
     }
 
-    .form-inner {
-      width: 100%;
-      max-width: 480px;
-    }
+    .form-inner { width: 100%; max-width: 480px; }
 
-    .logo {
-      text-decoration: none;
-      margin-bottom: 40px;
-      display: block;
-    }
+    .logo { text-decoration: none; margin-bottom: 36px; display: block; }
 
-    h1 {
-      font-size: 32px;
-      font-weight: 700;
-      color: #111827;
-      line-height: 1.2;
-      margin-bottom: 10px;
-    }
+    h1 { font-size: 28px; font-weight: 700; color: #111827; line-height: 1.2; margin-bottom: 8px; }
 
-    .subtext {
-      font-size: 16px;
-      color: #6b7280;
-      margin-bottom: 36px;
-      line-height: 1.5;
-    }
+    .subtext { font-size: 15px; color: #6b7280; margin-bottom: 28px; line-height: 1.5; }
 
     .error-banner {
       display: none;
@@ -557,7 +538,7 @@ app.get('/signup', (req, res) => {
       text-align: center;
     }
 
-    .form-group { margin-bottom: 18px; }
+    .form-group { margin-bottom: 16px; }
 
     label {
       display: block;
@@ -569,7 +550,7 @@ app.get('/signup', (req, res) => {
 
     input, select {
       width: 100%;
-      height: 48px;
+      height: 46px;
       padding: 0 14px;
       border: 1.5px solid #e5e7eb;
       border-radius: 10px;
@@ -591,21 +572,124 @@ app.get('/signup', (req, res) => {
     input:focus, select:focus {
       outline: none;
       border-color: #534AB7;
-      box-shadow: 0 0 0 3px rgba(83, 74, 183, 0.12);
+      box-shadow: 0 0 0 3px rgba(83,74,183,0.12);
     }
 
-    input.invalid, select.invalid {
-      border-color: #ef4444;
-      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
-    }
+    input.invalid, select.invalid { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.1); }
 
-    .field-error {
+    .field-error { display: block; font-size: 12px; color: #ef4444; margin-top: 4px; min-height: 16px; }
+
+    /* ── Plan cards ── */
+    .plan-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 10px;
       display: block;
-      font-size: 12px;
-      color: #ef4444;
-      margin-top: 4px;
-      min-height: 16px;
     }
+
+    .plan-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+
+    .plan-card {
+      border: 2px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 14px 12px;
+      cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+      position: relative;
+      background: #fff;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .plan-card:hover { border-color: #534AB7; box-shadow: 0 0 0 3px rgba(83,74,183,0.08); }
+
+    .plan-card.selected {
+      border-color: #534AB7;
+      background: #f5f4ff;
+      box-shadow: 0 0 0 3px rgba(83,74,183,0.12);
+    }
+
+    .plan-card.invalid-plan { border-color: #ef4444; }
+
+    .plan-badge {
+      display: inline-block;
+      font-size: 9px;
+      font-weight: 700;
+      color: #fff;
+      background: #D85A30;
+      border-radius: 100px;
+      padding: 2px 7px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .plan-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: #111827;
+      margin-bottom: 4px;
+    }
+
+    .plan-price {
+      font-size: 20px;
+      font-weight: 800;
+      color: #111827;
+      line-height: 1;
+      margin-bottom: 2px;
+    }
+
+    .plan-price span {
+      font-size: 12px;
+      font-weight: 500;
+      color: #6b7280;
+    }
+
+    .plan-features {
+      margin-top: 8px;
+      list-style: none;
+    }
+
+    .plan-features li {
+      font-size: 11px;
+      color: #6b7280;
+      padding: 1px 0;
+      padding-left: 14px;
+      position: relative;
+    }
+
+    .plan-features li::before {
+      content: '✓';
+      position: absolute;
+      left: 0;
+      color: #534AB7;
+      font-weight: 700;
+    }
+
+    .plan-card.selected .plan-features li { color: #374151; }
+
+    .plan-check {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #534AB7;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .plan-check svg { display: block; }
+
+    .plan-card.selected .plan-check { display: flex; }
 
     .btn-submit {
       width: 100%;
@@ -617,59 +701,34 @@ app.get('/signup', (req, res) => {
       font-size: 16px;
       font-weight: 700;
       cursor: pointer;
-      margin-top: 8px;
+      margin-top: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
       transition: background 0.2s, transform 0.1s;
-      letter-spacing: 0.01em;
     }
 
-    .btn-submit:hover:not(:disabled) {
-      background: #c24e27;
-      transform: translateY(-1px);
-    }
-
+    .btn-submit:hover:not(:disabled) { background: #c24e27; transform: translateY(-1px); }
     .btn-submit:active:not(:disabled) { transform: translateY(0); }
     .btn-submit:disabled { opacity: 0.7; cursor: not-allowed; }
 
     .spinner {
-      width: 18px;
-      height: 18px;
+      width: 18px; height: 18px;
       border: 2px solid rgba(255,255,255,0.4);
       border-top-color: #fff;
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
       display: none;
     }
-
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    .fine-print {
-      text-align: center;
-      font-size: 13px;
-      color: #9ca3af;
-      margin-top: 14px;
-      line-height: 1.5;
-    }
-
-    .signin-link {
-      text-align: center;
-      font-size: 14px;
-      color: #6b7280;
-      margin-top: 24px;
-    }
-
-    .signin-link a {
-      color: #534AB7;
-      text-decoration: none;
-      font-weight: 600;
-    }
-
+    .fine-print { text-align: center; font-size: 12px; color: #9ca3af; margin-top: 12px; line-height: 1.5; }
+    .signin-link { text-align: center; font-size: 14px; color: #6b7280; margin-top: 20px; }
+    .signin-link a { color: #534AB7; text-decoration: none; font-weight: 600; }
     .signin-link a:hover { text-decoration: underline; }
 
-    /* ── Right panel (social proof) ── */
+    /* ── Right panel ── */
     .social-panel {
       flex: 0 0 40%;
       background: #1a1a2e;
@@ -685,126 +744,43 @@ app.get('/signup', (req, res) => {
     .social-panel::before {
       content: '';
       position: absolute;
-      top: -80px;
-      right: -80px;
-      width: 300px;
-      height: 300px;
-      background: rgba(83, 74, 183, 0.15);
+      top: -80px; right: -80px;
+      width: 300px; height: 300px;
+      background: rgba(83,74,183,0.15);
       border-radius: 50%;
       pointer-events: none;
     }
 
-    .quote-mark {
-      font-size: 60px;
-      line-height: 1;
-      color: #D85A30;
-      font-family: Georgia, serif;
-      margin-bottom: 16px;
-      display: block;
-    }
+    .quote-mark { font-size: 60px; line-height: 1; color: #D85A30; font-family: Georgia, serif; margin-bottom: 16px; display: block; }
+    .pull-quote { font-size: 17px; line-height: 1.65; color: #e2e8f0; margin-bottom: 20px; font-style: italic; }
+    .attribution { font-size: 14px; color: #94a3b8; font-weight: 600; margin-bottom: 36px; }
+    .divider { height: 1px; background: rgba(255,255,255,0.12); margin-bottom: 36px; }
 
-    .pull-quote {
-      font-size: 17px;
-      line-height: 1.65;
-      color: #e2e8f0;
-      margin-bottom: 20px;
-      font-style: italic;
-    }
-
-    .attribution {
-      font-size: 14px;
-      color: #94a3b8;
-      font-weight: 600;
-      margin-bottom: 36px;
-    }
-
-    .divider {
-      height: 1px;
-      background: rgba(255,255,255,0.12);
-      margin-bottom: 36px;
-    }
-
-    .stat-pills {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      margin-bottom: 48px;
-    }
-
+    .stat-pills { display: flex; flex-direction: column; gap: 12px; margin-bottom: 48px; }
     .stat-pill {
-      background: #fff;
-      color: #1a1a2e;
-      border-radius: 100px;
-      padding: 10px 20px;
-      font-size: 14px;
-      font-weight: 700;
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      width: fit-content;
+      background: #fff; color: #1a1a2e; border-radius: 100px;
+      padding: 10px 20px; font-size: 14px; font-weight: 700;
+      display: inline-flex; align-items: center; gap: 10px; width: fit-content;
     }
+    .stat-pill .stat-value { font-size: 18px; font-weight: 800; color: #534AB7; }
 
-    .stat-pill .stat-value {
-      font-size: 18px;
-      font-weight: 800;
-      color: #534AB7;
-    }
-
-    .panel-brand {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .panel-tagline {
-      font-size: 13px;
-      color: #64748b;
-    }
-
-    /* ── Responsive ── */
     @media (max-width: 768px) {
       body { flex-direction: column; }
-
-      .form-panel {
-        flex: none;
-        padding: 32px 20px;
-        order: 1;
-        align-items: stretch;
-      }
-
-      .social-panel {
-        display: none;
-      }
-
-      h1 { font-size: 26px; }
+      .form-panel { flex: none; padding: 32px 20px; order: 1; align-items: stretch; }
+      .social-panel { display: none; }
+      h1 { font-size: 24px; }
+      .plan-cards { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Left: Form -->
   <div class="form-panel">
    <div class="form-inner">
-    <a href="https://bimblyai.com" class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" height="48" style="display:block;">
-  <g transform="translate(8, 10)">
-    <path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z"
-          fill="none" stroke="#534AB7" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="42" cy="27" r="8" fill="#534AB7"/>
-    <circle cx="43" cy="28" r="3.5" fill="white"/>
-    <circle cx="82" cy="27" r="8" fill="#534AB7"/>
-    <circle cx="83" cy="28" r="3.5" fill="white"/>
-    <path d="M52 48 Q62 56 72 48" fill="none" stroke="#534AB7" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
-    <line x1="62" y1="14" x2="62" y2="3" stroke="#D85A30" stroke-width="3" stroke-linecap="round"/>
-    <circle cx="62" cy="3" r="6" fill="#D85A30"/>
-  </g>
-  <text x="130" y="58" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="-1">
-    <tspan fill="#534AB7">bimbly</tspan><tspan fill="#D85A30" font-weight="300">ai</tspan>
-  </text>
-  <text x="132" y="80" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" letter-spacing="1.8" fill="#5F5E5A">YOUR BUSINESS, POWERED BY AI</text>
-</svg></a>
+    <a href="https://bimblyai.com" class="logo"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" height="44" style="display:block;"><g transform="translate(8, 10)"><path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z" fill="none" stroke="#534AB7" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="42" cy="27" r="8" fill="#534AB7"/><circle cx="43" cy="28" r="3.5" fill="white"/><circle cx="82" cy="27" r="8" fill="#534AB7"/><circle cx="83" cy="28" r="3.5" fill="white"/><path d="M52 48 Q62 56 72 48" fill="none" stroke="#534AB7" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/><line x1="62" y1="14" x2="62" y2="3" stroke="#D85A30" stroke-width="3" stroke-linecap="round"/><circle cx="62" cy="3" r="6" fill="#D85A30"/></g><text x="130" y="58" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="-1"><tspan fill="#534AB7">bimbly</tspan><tspan fill="#D85A30" font-weight="300">ai</tspan></text><text x="132" y="80" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" letter-spacing="1.8" fill="#5F5E5A">YOUR BUSINESS, POWERED BY AI</text></svg></a>
 
     <h1>Start your free 30-day trial</h1>
-    <p class="subtext">Set up takes 15 minutes. Your 30-day trial starts today.</p>
+    <p class="subtext">Set up takes 15 minutes. No charges until your trial ends.</p>
 
     <div id="errorBanner" class="error-banner"></div>
 
@@ -828,7 +804,7 @@ app.get('/signup', (req, res) => {
       </div>
 
       <div class="form-group">
-        <label for="phone">Phone Number</label>
+        <label for="phone">Business Phone</label>
         <input type="tel" id="phone" name="phone" placeholder="+1 (416) 555-0000" autocomplete="tel">
         <span class="field-error" id="phoneError"></span>
       </div>
@@ -846,59 +822,86 @@ app.get('/signup', (req, res) => {
         <span class="field-error" id="businessTypeError"></span>
       </div>
 
+      <!-- Plan selection -->
+      <div class="form-group">
+        <span class="plan-label">Choose Your Plan</span>
+        <input type="hidden" id="plan" name="plan" value="">
+        <div class="plan-cards" id="planCards">
+
+          <div class="plan-card" data-plan="solo" onclick="selectPlan('solo')">
+            <div class="plan-check"><svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="plan-name">Solo</div>
+            <div class="plan-price">CA$39<span>/mo</span></div>
+            <ul class="plan-features">
+              <li>AI phone receptionist</li>
+              <li>Unlimited calls</li>
+              <li>SMS + email alerts</li>
+            </ul>
+          </div>
+
+          <div class="plan-card" data-plan="starter" onclick="selectPlan('starter')">
+            <div class="plan-badge">Popular</div>
+            <div class="plan-check"><svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="plan-name">Starter</div>
+            <div class="plan-price">CA$99<span>/mo</span></div>
+            <ul class="plan-features">
+              <li>Everything in Solo</li>
+              <li>Multi-language</li>
+              <li>Analytics dashboard</li>
+            </ul>
+          </div>
+
+          <div class="plan-card" data-plan="pro" onclick="selectPlan('pro')">
+            <div class="plan-check"><svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4l3 3 5-6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div class="plan-name">Pro</div>
+            <div class="plan-price">CA$199<span>/mo</span></div>
+            <ul class="plan-features">
+              <li>Everything in Starter</li>
+              <li>Priority support</li>
+              <li>Advanced analytics</li>
+            </ul>
+          </div>
+
+        </div>
+        <span class="field-error" id="planError"></span>
+      </div>
+
       <button type="submit" id="submitBtn" class="btn-submit">
         <span id="submitText">Start My Free Trial →</span>
         <span id="spinner" class="spinner"></span>
       </button>
     </form>
 
-    <p class="fine-print">30 days free. Then CA$49/month. Cancel anytime. No setup fees.</p>
-    <p class="signin-link">Already have an account? <a href="/dashboard/login">Sign in</a></p>
+    <p class="fine-print">30-day free trial. Then from CA$39/month. Cancel anytime.</p>
+    <p class="signin-link">Already have an account? <a href="/auth/dashboard/login">Sign in</a></p>
    </div>
   </div>
 
-  <!-- Right: Social proof -->
   <div class="social-panel">
     <span class="quote-mark">"</span>
     <p class="pull-quote">I used to miss 8–10 calls a day mid-cut. Now every call gets answered and I get a booking notification on my phone. It paid for itself in the first week.</p>
     <p class="attribution">— Sam, Owner, Metro Cuts Toronto</p>
-
     <div class="divider"></div>
-
     <div class="stat-pills">
-      <div class="stat-pill">
-        <span class="stat-value">30+</span> calls captured monthly
-      </div>
-      <div class="stat-pill">
-        <span class="stat-value">40%</span> after-hours bookings
-      </div>
-      <div class="stat-pill">
-        <span class="stat-value">$49/mo</span> all-in pricing
-      </div>
+      <div class="stat-pill"><span class="stat-value">30+</span> calls captured monthly</div>
+      <div class="stat-pill"><span class="stat-value">40%</span> after-hours bookings</div>
+      <div class="stat-pill"><span class="stat-value">from $39</span> /mo all-in</div>
     </div>
-
-    <div class="panel-brand">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" height="48" style="display:block;">
-  <g transform="translate(8, 10)">
-    <path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z"
-          fill="none" stroke="#7F77DD" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="42" cy="27" r="8" fill="#7F77DD"/>
-    <circle cx="43" cy="28" r="3.5" fill="white"/>
-    <circle cx="82" cy="27" r="8" fill="#7F77DD"/>
-    <circle cx="83" cy="28" r="3.5" fill="white"/>
-    <path d="M52 48 Q62 56 72 48" fill="none" stroke="#7F77DD" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/>
-    <line x1="62" y1="14" x2="62" y2="3" stroke="#F0997B" stroke-width="3" stroke-linecap="round"/>
-    <circle cx="62" cy="3" r="6" fill="#F0997B"/>
-  </g>
-  <text x="130" y="58" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="-1">
-    <tspan fill="#AFA9EC">bimbly</tspan><tspan fill="#F0997B" font-weight="300">ai</tspan>
-  </text>
-  <text x="132" y="80" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" letter-spacing="1.8" fill="#5F5E5A">YOUR BUSINESS, POWERED BY AI</text>
-</svg>
-    </div>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100" height="44" style="display:block;"><g transform="translate(8, 10)"><path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z" fill="none" stroke="#7F77DD" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="42" cy="27" r="8" fill="#7F77DD"/><circle cx="43" cy="28" r="3.5" fill="white"/><circle cx="82" cy="27" r="8" fill="#7F77DD"/><circle cx="83" cy="28" r="3.5" fill="white"/><path d="M52 48 Q62 56 72 48" fill="none" stroke="#7F77DD" stroke-width="2.5" stroke-linecap="round" opacity="0.5"/><line x1="62" y1="14" x2="62" y2="3" stroke="#F0997B" stroke-width="3" stroke-linecap="round"/><circle cx="62" cy="3" r="6" fill="#F0997B"/></g><text x="130" y="58" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="38" font-weight="700" letter-spacing="-1"><tspan fill="#AFA9EC">bimbly</tspan><tspan fill="#F0997B" font-weight="300">ai</tspan></text><text x="132" y="80" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" letter-spacing="1.8" fill="#5F5E5A">YOUR BUSINESS, POWERED BY AI</text></svg>
   </div>
 
   <script>
+    // ── Plan selection ────────────────────────────────────────────────────────
+    function selectPlan(plan) {
+      document.getElementById('plan').value = plan;
+      document.querySelectorAll('.plan-card').forEach(c => {
+        c.classList.toggle('selected', c.dataset.plan === plan);
+        c.classList.remove('invalid-plan');
+      });
+      document.getElementById('planError').textContent = '';
+    }
+
+    // ── Form validation ───────────────────────────────────────────────────────
     const form = document.getElementById('signupForm');
     const submitBtn = document.getElementById('submitBtn');
     const submitText = document.getElementById('submitText');
@@ -908,8 +911,8 @@ app.get('/signup', (req, res) => {
     function setError(inputId, errorId, msg) {
       const el = document.getElementById(inputId);
       const err = document.getElementById(errorId);
-      if (msg) { el.classList.add('invalid'); err.textContent = msg; }
-      else { el.classList.remove('invalid'); err.textContent = ''; }
+      if (msg) { el && el.classList.add('invalid'); err.textContent = msg; }
+      else { el && el.classList.remove('invalid'); err.textContent = ''; }
     }
 
     ['ownerName','businessName','email','phone','businessType'].forEach(id => {
@@ -921,12 +924,17 @@ app.get('/signup', (req, res) => {
     function validate() {
       let ok = true;
       const v = id => document.getElementById(id).value.trim();
-      if (!v('ownerName')) { setError('ownerName','ownerNameError','Please enter your name.'); ok = false; }
-      if (!v('businessName')) { setError('businessName','businessNameError','Please enter your business name.'); ok = false; }
+      if (!v('ownerName'))     { setError('ownerName',     'ownerNameError',     'Please enter your name.');           ok = false; }
+      if (!v('businessName'))  { setError('businessName',  'businessNameError',  'Please enter your business name.'); ok = false; }
       const email = v('email');
-      if (!email || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) { setError('email','emailError','Please enter a valid email address.'); ok = false; }
-      if (!v('phone')) { setError('phone','phoneError','Please enter your phone number.'); ok = false; }
-      if (!v('businessType')) { setError('businessType','businessTypeError','Please select a business type.'); ok = false; }
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError('email', 'emailError', 'Please enter a valid email address.'); ok = false; }
+      if (!v('phone'))         { setError('phone',         'phoneError',         'Please enter your phone number.');  ok = false; }
+      if (!v('businessType'))  { setError('businessType',  'businessTypeError',  'Please select a business type.');   ok = false; }
+      if (!v('plan')) {
+        document.querySelectorAll('.plan-card').forEach(c => c.classList.add('invalid-plan'));
+        document.getElementById('planError').textContent = 'Please choose a plan to continue.';
+        ok = false;
+      }
       return ok;
     }
 
@@ -944,12 +952,12 @@ app.get('/signup', (req, res) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ownerName: document.getElementById('ownerName').value.trim(),
+            ownerName:    document.getElementById('ownerName').value.trim(),
             businessName: document.getElementById('businessName').value.trim(),
-            email: document.getElementById('email').value.trim(),
-            phone: document.getElementById('phone').value.trim(),
+            email:        document.getElementById('email').value.trim(),
+            phone:        document.getElementById('phone').value.trim(),
             businessType: document.getElementById('businessType').value,
-            plan: (document.getElementById('plan') ? document.getElementById('plan').value : 'solo')
+            plan:         document.getElementById('plan').value,
           })
         });
 
