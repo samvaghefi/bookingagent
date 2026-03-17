@@ -81,7 +81,7 @@ async function handleCheckoutCompleted(session) {
   try {
     // 1. Provision Twilio phone number
     console.log('📞 Provisioning Twilio number for:', business.name);
-    twilioPhone = await provisionPhoneNumber(business);
+    twilioPhone = await provisionPhoneNumber(business, business.city, business.province);
 
     // 2. Persist phone number before Vapi creation so the assistant config has it
     await supabase.from('businesses').update({ twilio_phone: twilioPhone }).eq('id', businessId);
@@ -1176,7 +1176,7 @@ app.post('/admin/test-provisioning', express.json(), async (req, res) => {
   // Step b: Provision Twilio phone number
   try {
     const biz = { id: businessId, name: businessName, email };
-    twilioPhone = await provisionPhoneNumber(biz);
+    twilioPhone = await provisionPhoneNumber(biz, city, province);
     steps.twilioProvisioned = { phoneNumber: twilioPhone };
     console.log(`  ✅ Twilio provisioned: ${twilioPhone}`);
   } catch (err) {
