@@ -24,7 +24,8 @@ router.get('/api/business', async (req, res) => {
         'id', 'name', 'owner_name', 'email', 'phone', 'address',
         'business_hours', 'ai_name', 'business_type', 'billing_email',
         'subscription_status', 'trial_ends_at', 'stripe_customer_id',
-        'stripe_subscription_id', 'is_active', 'created_at', 'call_recording_enabled', 'supported_languages'
+        'stripe_subscription_id', 'is_active', 'created_at', 'call_recording_enabled', 'supported_languages',
+        'twilio_phone', 'timezone', 'barbers'
       ].join(', '))
       .eq('id', req.business.id)
       .single();

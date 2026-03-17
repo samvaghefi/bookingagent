@@ -984,7 +984,7 @@ function OnboardingPage({ setPage }) {
     if (step === lastStep) {
       apiFetch('/api/business')
         .then(r => r.json())
-        .then(res => setBizPhone((res.business || res).phone || null))
+        .then(res => setBizPhone((res.business || res).twilio_phone || (res.business || res).phone || null))
         .catch(() => {});
     }
   }, [step, plan]);
@@ -1086,12 +1086,15 @@ function OnboardingPage({ setPage }) {
               />
             </div>
             <div className="form-group">
-              <label>Business Phone</label>
+              <label>Your Business Phone Number</label>
               <input
                 value={data.phone}
                 onChange={e => setField('phone', e.target.value)}
                 placeholder="+1 (416) 555-0000"
               />
+              <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>
+                This is your current number that customers call. You'll forward this to your Bimbly number in the last step.
+              </p>
             </div>
             <div className="form-group">
               <label>Address</label>
