@@ -787,24 +787,66 @@ function BillingPage() {
 }
 
 // ── Onboarding Page ───────────────────────────────────────────────────────────
+const SERVICE_DEFAULTS = {
+  'Barbershop': [
+    { name: "Men's Haircut", price: '35', duration_minutes: '30' },
+    { name: 'Beard Trim',    price: '20', duration_minutes: '20' },
+    { name: "Kid's Haircut", price: '25', duration_minutes: '20' },
+    { name: 'Shape Up',      price: '25', duration_minutes: '20' },
+  ],
+  'Hair Salon': [
+    { name: 'Haircut',     price: '55',  duration_minutes: '45' },
+    { name: 'Blowout',     price: '45',  duration_minutes: '45' },
+    { name: 'Colour',      price: '120', duration_minutes: '120' },
+    { name: 'Highlights',  price: '150', duration_minutes: '150' },
+  ],
+  'Nail Salon': [
+    { name: 'Manicure',        price: '35', duration_minutes: '30' },
+    { name: 'Pedicure',        price: '45', duration_minutes: '45' },
+    { name: 'Gel Manicure',    price: '50', duration_minutes: '45' },
+    { name: 'Acrylic Full Set',price: '65', duration_minutes: '60' },
+  ],
+};
+
+const TEAM_LABEL = {
+  'Barbershop': 'Who are your barbers?',
+  'Hair Salon':  'Who are your stylists?',
+  'Nail Salon':  'Who are your nail technicians?',
+};
+
 function OnboardingPage({ setPage }) {
-  const [step, setStep]   = useState(1);
+  const [step, setStep]     = useState(1);
   const [saving, setSaving] = useState(false);
+  const [newBarber, setNewBarber] = useState('');
+  const [bizPhone, setBizPhone]   = useState(null);
   const [data, setData]   = useState({
-    name:    '',
-    phone:   '',
-    address: '',
-    ai_name: 'Sarah',
+    name:          '',
+    phone:         '',
+    address:       '',
+    ai_name:       'Sarah',
+    business_type: 'Barbershop',
+    timezone:      'America/Toronto',
     business_hours: {},
-    services: [
-      { name: "Men's Haircut",  price: '35', duration_minutes: '30' },
-      { name: 'Beard Trim',     price: '20', duration_minutes: '20' },
-      { name: "Kid's Haircut",  price: '25', duration_minutes: '20' },
-    ],
-    barbers: [],
+    services:      SERVICE_DEFAULTS['Barbershop'],
+    barbers:       [],
   });
 
   const setField = (key, val) => setData(d => ({ ...d, [key]: val }));
+
+  // Reset services when business type changes
+  useEffect(() => {
+    setData(d => ({ ...d, services: SERVICE_DEFAULTS[d.business_type] || SERVICE_DEFAULTS['Barbershop'] }));
+  }, [data.business_type]);
+
+  // Fetch actual business phone for Step 4
+  useEffect(() => {
+    if (step === 4) {
+      apiFetch('/api/business')
+        .then(r => r.json())
+        .then(res => setBizPhone((res.business || res).phone || null))
+        .catch(() => {});
+    }
+  }, [step]);
 
   const updateSvc = (i, key, val) =>
     setData(d => ({
@@ -832,6 +874,8 @@ function OnboardingPage({ setPage }) {
           phone:          data.phone,
           address:        data.address,
           ai_name:        data.ai_name,
+          business_type:  data.business_type,
+          timezone:       data.timezone,
           business_hours: data.business_hours,
           barbers:        data.barbers,
         }),
@@ -894,6 +938,24 @@ function OnboardingPage({ setPage }) {
                 placeholder="Sarah"
               />
             </div>
+            <div className="form-group">
+              <label>Business Type</label>
+              <select value={data.business_type} onChange={e => setField('business_type', e.target.value)}>
+                <option value="Barbershop">Barbershop</option>
+                <option value="Hair Salon">Hair Salon</option>
+                <option value="Nail Salon">Nail Salon</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Your Timezone</label>
+              <select value={data.timezone} onChange={e => setField('timezone', e.target.value)}>
+                <option value="America/Toronto">Eastern Time (Toronto)</option>
+                <option value="America/Vancouver">Pacific Time (Vancouver)</option>
+                <option value="America/Edmonton">Mountain Time (Calgary)</option>
+                <option value="America/Winnipeg">Central Time (Winnipeg)</option>
+                <option value="America/Halifax">Atlantic Time (Halifax)</option>
+              </select>
+            </div>
           </div>
         )}
 
@@ -937,9 +999,9 @@ function OnboardingPage({ setPage }) {
         {/* Step 3 */}
         {step === 3 && (
           <div className="step-content">
-            <h2>Who are your barbers?</h2>
+            <h2>{TEAM_LABEL[data.business_type] || 'Who is your team?'}</h2>
             <p className="step-sub">
-              Customers can request a specific barber when they call.
+              Customers can request a specific team member when they call.
             </p>
             <div className="barbers-list" style={{ marginBottom: 16 }}>
               {data.barbers.map((name, i) => (
@@ -952,12 +1014,12 @@ function OnboardingPage({ setPage }) {
                 </div>
               ))}
               {data.barbers.length === 0 && (
-                <span style={{ color: '#9ca3af', fontSize: 13 }}>No barbers added yet.</span>
+                <span style={{ color: '#9ca3af', fontSize: 13 }}>No team members added yet.</span>
               )}
             </div>
             <div className="add-barber-row" style={{ padding: 0 }}>
               <input
-                placeholder="Barber name"
+                placeholder="Name"
                 value={newBarber}
                 onChange={e => setNewBarber(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addBarber()}
@@ -976,7 +1038,7 @@ function OnboardingPage({ setPage }) {
             </p>
             <div className="forward-box">
               <div className="forward-label">Your Bimbly Number</div>
-              <div className="forward-number">+1 (647) 000-0000</div>
+              <div className="forward-number">{bizPhone || '...'}</div>
             </div>
             <div className="instructions">
               <div className="instr-title">iPhone</div>

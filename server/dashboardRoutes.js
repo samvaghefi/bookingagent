@@ -39,7 +39,7 @@ router.get('/api/business', async (req, res) => {
 
 // PUT /api/business — update allowed business fields
 router.put('/api/business', async (req, res) => {
-  const allowed = ['name', 'phone', 'address', 'business_hours', 'ai_name'];
+  const allowed = ['name', 'phone', 'address', 'business_hours', 'ai_name', 'business_type', 'timezone', 'barbers'];
   const updates = {};
   allowed.forEach(field => {
     if (req.body[field] !== undefined) updates[field] = req.body[field];
