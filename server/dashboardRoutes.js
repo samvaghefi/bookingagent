@@ -353,14 +353,16 @@ router.put('/api/services/replace', async (req, res) => {
 
 // GET /api/billing — subscription info from Stripe
 router.get('/api/billing', async (req, res) => {
-  const { stripe_subscription_id, subscription_status, trial_ends_at } = req.business;
+  const { stripe_subscription_id, subscription_status, trial_ends_at, plan } = req.business;
+  const PLAN_PRICES = { solo: 39, starter: 99, pro: 199 };
+  const planAmount = PLAN_PRICES[plan] || 39;
 
   if (!stripe_subscription_id) {
     return res.json({
       subscription_status: subscription_status || 'inactive',
       trial_end: trial_ends_at ? Math.floor(new Date(trial_ends_at).getTime() / 1000) : null,
       current_period_end: null,
-      amount: null,
+      amount: planAmount,
       currency: 'CAD',
       cancel_at_period_end: false
     });

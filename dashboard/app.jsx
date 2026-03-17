@@ -717,10 +717,12 @@ function BillingPage() {
   const plan        = business?.plan || 'solo';
   const planLabel   = PLAN_LABELS[plan] || plan;
   const upgradeInfo = UPGRADE_INFO[plan];
-  // Use the real amount from Stripe (grandfathers old pricing), fall back to plan defaults only if no subscription yet
-  const PLAN_DEFAULT_PRICE = { solo: 39, starter: 99, pro: 199 };
-  const displayAmount = billing?.amount != null ? billing.amount : (PLAN_DEFAULT_PRICE[plan] || null);
-  const displayPrice  = displayAmount != null ? `CA$${displayAmount.toFixed(2)}` : '';
+  // Amount from API: real Stripe amount (grandfathered) or plan-derived for trial users
+  const displayAmount = billing?.amount != null ? billing.amount : null;
+  const isTrial = status === 'trial' || status === 'trialing';
+  const displayPrice = displayAmount != null
+    ? `CA$${Number(displayAmount).toFixed(2)}${isTrial ? ' (after trial ends)' : ''}`
+    : '';
 
   const features = [
     '24/7 AI receptionist answers every call',
