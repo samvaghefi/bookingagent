@@ -1129,6 +1129,34 @@ app.get('/health', (req, res) => {
   });
 });
 
+
+// ── GET /admin/vapi-template ──────────────────────────────────────────────
+// Returns the current system prompt of the Vapi template assistant.
+// Requires header: x-admin-key matching ADMIN_SECRET env var.
+app.get('/admin/vapi-template', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const axios = require('axios');
+    const r = await axios.get(
+      `https://api.vapi.ai/assistant/3f7183f9-4796-4104-8b08-015a4d675792`,
+      { headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}` }, timeout: 15000 }
+    );
+    const messages = (r.data.model && r.data.model.messages) || [];
+    const sys = messages.find(m => m.role === 'system');
+    return res.json({
+      assistantId: r.data.id,
+      assistantName: r.data.name,
+      systemPrompt: sys ? sys.content : null,
+      allFields: Object.keys(r.data),
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /admin/test-provisioning ─────────────────────────────────────────────
 // Bypasses Stripe and tests the full Twilio + Vapi provisioning chain.
 // Requires header: x-admin-key matching ADMIN_SECRET env var.
