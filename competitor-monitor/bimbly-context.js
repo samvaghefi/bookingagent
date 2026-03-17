@@ -1,0 +1,31 @@
+module.exports = {
+  name: "Bimbly AI",
+  tagline: "Every call answered. Every booking captured.",
+  pricing: [
+    { plan: "Solo", price: 39, perMonth: true, perBookingFee: false },
+    { plan: "Starter", price: 99, perMonth: true, perBookingFee: false },
+    { plan: "Pro", price: 199, perMonth: true, perBookingFee: false },
+  ],
+  keyFeatures: [
+    "Voice AI answers calls and books appointments 24/7",
+    "Multilingual support (English and Korean)",
+    "SMS confirmations and reminders via Twilio",
+    "Email confirmations via SendGrid",
+    "Google Calendar sync",
+    "Flat monthly pricing with no per-booking fees",
+    "White-glove onboarding for first customers",
+    "Built specifically for independent barbershops, hair salons, and nail salons",
+    "Targets multicultural markets in Toronto",
+    "Competes directly with Booksy -- not complementary to it",
+  ],
+  missingFeatures: [
+    "Walk-in waitlist and QR code (in backlog)",
+    "Public booking page /book/slug (in backlog)",
+    "Multi-barber support (in backlog)",
+    "No-show deposits (in backlog)",
+    "Client profiles (in backlog)",
+    "Reserve with Google (in backlog)",
+  ],
+  targetCustomer: "Independent analog barbershops and salons running on regulars, not chains",
+  geographicFocus: "Toronto, Canada -- multicultural neighbourhoods",
+};

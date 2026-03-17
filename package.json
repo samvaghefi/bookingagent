@@ -25,6 +25,10 @@
     "jsonwebtoken": "^9.0.3",
     "luxon": "^3.7.2",
     "stripe": "^20.4.1",
-    "twilio": "^5.12.2"
+    "twilio": "^5.12.2",
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
+    "rss-parser": "^3.13.0",
+    "puppeteer": "^22.0.0"
   }
 }
