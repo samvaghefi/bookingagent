@@ -5,6 +5,13 @@ require('dotenv').config();
 //   INTEL_SESSION_SECRET  — random string to sign session cookies
 // Required env vars (provisioning):
 //   VAPI_API_KEY           — Vapi API key for assistant management
+// Required env vars (test mode):
+//   TEST_MODE              — set to 'true' to use Stripe sandbox credentials
+//   STRIPE_TEST_SECRET_KEY — Stripe test secret key (sk_test_...)
+//   STRIPE_TEST_WEBHOOK_SECRET — Stripe test webhook signing secret
+//   STRIPE_TEST_SOLO_PRICE_ID, STRIPE_TEST_STARTER_PRICE_ID, STRIPE_TEST_PRO_PRICE_ID
+// Required env vars (admin):
+//   ADMIN_SECRET           — secret header value for /admin/* endpoints
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -12,7 +19,11 @@ const { createClient } = require('@supabase/supabase-js');
 const { extractFromToolCall, extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
 const { sendCustomerSMS, sendOwnerEmail, sendWelcomeEmail, sendInternalSignupNotification, sendPaymentFailedEmail } = require('./notificationService');
 const { getAuthUrl, getTokensFromCode, createCalendarEvent } = require('./calendarService');
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const stripe = require('stripe')(
+  process.env.TEST_MODE === 'true'
+    ? process.env.STRIPE_TEST_SECRET_KEY
+    : process.env.STRIPE_SECRET_KEY
+);
 const { createCheckoutSession } = require('./billingService');
 const { createBusiness } = require('./signupService');
 const { provisionPhoneNumber, releasePhoneNumber } = require('./twilioProvisioningService');
@@ -135,7 +146,9 @@ Check Render logs for full stack trace.`
 // ── Stripe webhook (must be before express.json() to get raw body) ────────────
 app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const webhookSecret = process.env.TEST_MODE === 'true'
+    ? process.env.STRIPE_TEST_WEBHOOK_SECRET
+    : process.env.STRIPE_WEBHOOK_SECRET;
 
   let event;
   try {
@@ -1091,12 +1104,174 @@ app.post('/onboarding/complete', authMiddlewareFn, async (req, res) => {
   }
 });
 
+// ── GET /health ──────────────────────────────────────────────────────────────
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    testMode: process.env.TEST_MODE === 'true',
+    services: {
+      supabase:  process.env.SUPABASE_URL        ? 'connected'   : 'missing',
+      stripe:    (process.env.TEST_MODE === 'true' ? process.env.STRIPE_TEST_SECRET_KEY : process.env.STRIPE_SECRET_KEY)
+                                                 ? (process.env.TEST_MODE === 'true' ? 'test' : 'live') : 'missing',
+      twilio:    process.env.TWILIO_ACCOUNT_SID  ? 'configured'  : 'missing',
+      vapi:      process.env.VAPI_API_KEY         ? 'configured'  : 'missing',
+      sendgrid:  process.env.SENDGRID_API_KEY     ? 'configured'  : 'missing',
+    },
+  });
+});
+
+// ── POST /admin/test-provisioning ─────────────────────────────────────────────
+// Bypasses Stripe and tests the full Twilio + Vapi provisioning chain.
+// Requires header: x-admin-key matching ADMIN_SECRET env var.
+// Required env vars:
+//   ADMIN_SECRET — any long random string, set in Render env vars
+const { deleteVapiAssistant } = require('./vapiService');
+app.post('/admin/test-provisioning', express.json(), async (req, res) => {
+  // Auth check
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden — missing or invalid x-admin-key' });
+  }
+
+  const {
+    businessName = `Test Shop ${Date.now()}`,
+    ownerName    = 'Test Owner',
+    email        = `test+${Date.now()}@test.bimblyai.com`,
+    phone        = '+14165550001',
+    businessType = 'barbershop',
+    plan         = 'solo',
+    cleanup      = false,
+  } = req.body || {};
+
+  const steps = {};
+  const errors = [];
+
+  let businessId    = null;
+  let twilioPhone   = null;
+  let vapiAssistantId = null;
+
+  console.log(`🧪 Test provisioning started: ${businessName} (${email})`);
+
+  // Step a: Create business
+  try {
+    const biz = await createBusiness({ businessName, ownerName, email, phone, businessType, plan });
+    businessId = biz.id;
+    steps.businessCreated = { id: biz.id, name: biz.name };
+    console.log(`  ✅ Business created: ${biz.id}`);
+  } catch (err) {
+    errors.push({ step: 'businessCreated', error: err.message });
+    console.error('  ❌ Business creation failed:', err.message);
+    return res.json({ success: false, steps, errors });
+  }
+
+  // Step b: Provision Twilio phone number
+  try {
+    const biz = { id: businessId, name: businessName, email };
+    twilioPhone = await provisionPhoneNumber(biz);
+    steps.twilioProvisioned = { phoneNumber: twilioPhone };
+    console.log(`  ✅ Twilio provisioned: ${twilioPhone}`);
+  } catch (err) {
+    errors.push({ step: 'twilioProvisioned', error: err.message });
+    console.error('  ❌ Twilio provisioning failed:', err.message);
+    // Cleanup business
+    await supabase.from('businesses').delete().eq('id', businessId);
+    return res.json({ success: false, steps, errors });
+  }
+
+  // Step c: Create Vapi assistant
+  try {
+    const biz = { id: businessId, name: businessName, email, twilio_phone: twilioPhone, plan };
+    vapiAssistantId = await createVapiAssistant(biz);
+    steps.vapiCreated = { assistantId: vapiAssistantId };
+    console.log(`  ✅ Vapi assistant created: ${vapiAssistantId}`);
+  } catch (err) {
+    errors.push({ step: 'vapiCreated', error: err.message });
+    console.error('  ❌ Vapi creation failed:', err.message);
+    // Rollback Twilio + business
+    try { await releasePhoneNumber(twilioPhone); } catch (e) { console.warn('Rollback Twilio failed:', e.message); }
+    await supabase.from('businesses').delete().eq('id', businessId);
+    return res.json({ success: false, steps, errors });
+  }
+
+  // Step d+e: Update Supabase record
+  try {
+    const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    await supabase.from('businesses').update({
+      twilio_phone: twilioPhone,
+      vapi_assistant_id: vapiAssistantId,
+      is_active: true,
+      subscription_status: 'trial',
+      trial_ends_at: trialEndsAt,
+    }).eq('id', businessId);
+    steps.supabaseUpdated = true;
+    console.log('  ✅ Supabase updated');
+  } catch (err) {
+    errors.push({ step: 'supabaseUpdated', error: err.message });
+    console.error('  ❌ Supabase update failed:', err.message);
+  }
+
+  // Step f: Welcome email
+  try {
+    const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    const biz = { id: businessId, name: businessName, email, phone, plan, twilio_phone: twilioPhone, vapi_assistant_id: vapiAssistantId, trial_ends_at: trialEndsAt };
+    await sendWelcomeEmail(biz);
+    steps.welcomeEmailSent = true;
+    console.log('  ✅ Welcome email sent');
+  } catch (err) {
+    errors.push({ step: 'welcomeEmailSent', error: err.message });
+    console.error('  ❌ Welcome email failed:', err.message);
+  }
+
+  // Step g: Internal notification
+  try {
+    const biz = { id: businessId, name: businessName, email, phone, plan, twilio_phone: twilioPhone };
+    await sendInternalSignupNotification(biz);
+    steps.internalNotificationSent = true;
+    console.log('  ✅ Internal notification sent');
+  } catch (err) {
+    errors.push({ step: 'internalNotificationSent', error: err.message });
+    console.error('  ❌ Internal notification failed:', err.message);
+  }
+
+  // Step h: Schedule cleanup
+  if (cleanup) {
+    steps.cleanupScheduled = true;
+    setTimeout(async () => {
+      console.log('🧹 Running test cleanup...');
+      try {
+        if (vapiAssistantId) await deleteVapiAssistant(vapiAssistantId);
+        console.log('  ✅ Vapi assistant deleted');
+      } catch (e) { console.warn('  ⚠️  Vapi cleanup failed:', e.message); }
+      try {
+        if (twilioPhone) await releasePhoneNumber(twilioPhone);
+        console.log('  ✅ Twilio number released');
+      } catch (e) { console.warn('  ⚠️  Twilio cleanup failed:', e.message); }
+      try {
+        if (businessId) await supabase.from('businesses').delete().eq('id', businessId);
+        console.log('  ✅ Business record deleted');
+      } catch (e) { console.warn('  ⚠️  Supabase cleanup failed:', e.message); }
+      console.log('🧹 Test cleanup complete');
+    }, 5000);
+  } else {
+    steps.cleanupScheduled = false;
+  }
+
+  const success = errors.length === 0;
+  console.log(`🧪 Test provisioning ${success ? 'PASSED ✅' : 'FAILED ❌'} (${errors.length} errors)`);
+  res.json({ success, steps, errors });
+});
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 BookingAgent server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV}`);
   console.log(`🔗 Health check: http://localhost:${PORT}`);
+  if (process.env.TEST_MODE === 'true') {
+    console.warn('⚠️  TEST MODE ACTIVE — using Stripe sandbox credentials');
+    console.warn('⚠️  TEST MODE: Twilio/Vapi still use live credentials — test resources will be auto-released if cleanup=true');
+  }
   console.log('Supabase URL configured:', process.env.SUPABASE_URL ? process.env.SUPABASE_URL.substring(0, 30) + '...' : 'MISSING');
   console.log('Node version:', process.version);
   if (!process.env.STRIPE_WEBHOOK_SECRET) {
@@ -1116,6 +1291,10 @@ app.listen(PORT, () => {
   }
   if (!process.env.VAPI_API_KEY) {
     console.warn('⚠️  VAPI_API_KEY is not set — Vapi assistant provisioning will fail.');
+  }
+  if (!process.env.ADMIN_SECRET) {
+    console.warn('⚠️  ADMIN_SECRET not set — /admin/* endpoints will return 403');
+    // Add ADMIN_SECRET to Render env vars: any long random string (e.g. openssl rand -hex 32)
   }
   if (!process.env.INTEL_USERNAME || !process.env.INTEL_PASSWORD) {
     console.warn('⚠️  INTEL_USERNAME / INTEL_PASSWORD not set — /intel portal will not be accessible.');
