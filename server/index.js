@@ -1,4 +1,8 @@
 require('dotenv').config();
+// Required env vars (Intel portal):
+//   INTEL_USERNAME        — username for /intel login
+//   INTEL_PASSWORD        — password for /intel login
+//   INTEL_SESSION_SECRET  — random string to sign session cookies
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -10,8 +14,10 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { createCheckoutSession } = require('./billingService');
 const { createBusiness } = require('./signupService');
 const cookieParser = require('cookie-parser');
+const session = require('express-session');
 const dashboardRoutes = require('./dashboardRoutes');
 const authRoutes = require('./authRoutes');
+const intelRoutes = require('./intelRoutes');
 
 const app = express();
 
@@ -134,8 +140,15 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 
 app.use(express.json());
 app.use(cookieParser());
+app.use(session({
+  secret: process.env.INTEL_SESSION_SECRET || 'changeme-set-INTEL_SESSION_SECRET',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000, httpOnly: true, secure: false },
+}));
 app.use(authRoutes);
 app.use(dashboardRoutes);
+app.use(intelRoutes);
 
 // ── Dashboard SPA ─────────────────────────────────────────────────────────────
 // Serve dashboard static files (JS, CSS) under /dashboard/
@@ -998,4 +1011,14 @@ app.listen(PORT, () => {
   if (!process.env.STRIPE_PRO_PRICE_ID) {
     console.warn('⚠️  STRIPE_PRO_PRICE_ID is not set — Pro plan signups will fail.');
   }
+  if (!process.env.INTEL_USERNAME || !process.env.INTEL_PASSWORD) {
+    console.warn('⚠️  INTEL_USERNAME / INTEL_PASSWORD not set — /intel portal will not be accessible.');
+  }
+  if (!process.env.INTEL_SESSION_SECRET) {
+    console.warn('⚠️  INTEL_SESSION_SECRET not set — using insecure fallback. Set this in Render env vars.');
+  }
+  console.log('\nAdd these to Render env vars for the bookingagent service:');
+  console.log('  INTEL_USERNAME=your_chosen_username');
+  console.log('  INTEL_PASSWORD=your_chosen_password');
+  console.log('  INTEL_SESSION_SECRET=any_long_random_string');
 });
