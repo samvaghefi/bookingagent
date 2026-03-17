@@ -1225,7 +1225,7 @@ app.post('/admin/test-provisioning', express.json(), async (req, res) => {
 
   // Step g: Internal notification
   try {
-    const biz = { id: businessId, name: businessName, email, phone, plan, twilio_phone: twilioPhone };
+    const biz = { id: businessId, name: businessName, owner_name: ownerName, email, phone, business_type: businessType, plan, twilio_phone: twilioPhone, vapi_assistant_id: vapiAssistantId };
     await sendInternalSignupNotification(biz);
     steps.internalNotificationSent = true;
     console.log('  ✅ Internal notification sent');

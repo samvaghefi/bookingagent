@@ -185,14 +185,74 @@ async function sendWelcomeEmail(business) {
 
 // ── sendInternalSignupNotification ────────────────────────────────────────────
 async function sendInternalSignupNotification(business) {
-  const label = planLabel(business.plan);
-  const text = `New trial started:\n\nBusiness: ${business.name}\nOwner: ${business.owner_name || 'N/A'}\nEmail: ${business.email}\nPhone: ${business.phone || 'N/A'}\nTwilio Number: ${business.twilio_phone || 'N/A'}\nVapi Assistant: ${business.vapi_assistant_id || 'N/A'}\nType: ${business.business_type || 'N/A'}\nPlan: ${label}\nBusiness ID: ${business.id}\n\nAction required: Verify setup looks correct in Render logs.`;
+  const label     = planLabel(business.plan);
+  const dashUrl   = 'https://bookingagent-gmo2.onrender.com/dashboard';
+  const timestamp = new Date().toLocaleString('en-CA', { timeZone: 'America/Toronto', dateStyle: 'medium', timeStyle: 'short' });
+
+  const row = (label, value, highlight = false) => `
+    <tr>
+      <td style="padding:8px 12px;font-size:13px;color:#6b7280;width:160px;vertical-align:top;">${label}</td>
+      <td style="padding:8px 12px;font-size:13px;color:${highlight ? '#0f172a' : '#111827'};font-weight:${highlight ? '700' : '400'};word-break:break-all;">${value || '<span style="color:#9ca3af;">N/A</span>'}</td>
+    </tr>`;
+
+  const html = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:system-ui,-apple-system,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;padding:24px 16px;">
+
+    <!-- Header -->
+    <div style="background:#0f172a;border-radius:8px 8px 0 0;padding:18px 24px;">
+      <img src="https://bimblyai.com/assets/bimblyai-logo-primary.svg" alt="bimblyai" style="height:36px;display:block;">
+    </div>
+
+    <!-- Title bar -->
+    <div style="background:#1e293b;padding:12px 24px;">
+      <span style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.08em;">New Signup Alert</span>
+    </div>
+
+    <!-- Card -->
+    <div style="background:#ffffff;border-radius:0 0 8px 8px;padding:0 0 8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+      <table style="width:100%;border-collapse:collapse;">
+        <tbody>
+          ${row('Business name', `<strong>${business.name}</strong>`, true)}
+          <tr><td colspan="2" style="padding:0 12px;"><hr style="border:none;border-top:1px solid #f1f5f9;margin:0;"></td></tr>
+          ${row('Owner name', business.owner_name)}
+          ${row('Email', business.email)}
+          ${row('Phone', business.phone)}
+          <tr><td colspan="2" style="padding:0 12px;"><hr style="border:none;border-top:1px solid #f1f5f9;margin:0;"></td></tr>
+          ${row('Twilio number', `<span style="font-family:monospace;font-size:14px;">${business.twilio_phone || ''}</span>`)}
+          ${row('Vapi assistant ID', `<span style="font-family:monospace;font-size:12px;">${business.vapi_assistant_id || ''}</span>`)}
+          <tr><td colspan="2" style="padding:0 12px;"><hr style="border:none;border-top:1px solid #f1f5f9;margin:0;"></td></tr>
+          ${row('Business type', business.business_type)}
+          ${row('Plan', `<span style="background:#dbeafe;color:#1d4ed8;font-size:12px;font-weight:600;padding:2px 8px;border-radius:4px;">${label}</span>`)}
+          ${row('Business ID', `<span style="font-family:monospace;font-size:12px;color:#6b7280;">${business.id}</span>`)}
+          ${row('Timestamp', timestamp)}
+        </tbody>
+      </table>
+
+      <!-- Actions -->
+      <div style="padding:16px 24px 8px;border-top:1px solid #f1f5f9;margin-top:8px;">
+        <a href="${dashUrl}" style="background:#0f172a;color:#ffffff;font-size:13px;font-weight:600;padding:9px 20px;border-radius:6px;display:inline-block;text-decoration:none;margin-right:10px;">Open Dashboard</a>
+      </div>
+    </div>
+
+    <div style="text-align:center;padding:16px;font-size:11px;color:#94a3b8;">
+      bimblyai internal &middot; ${timestamp}
+    </div>
+  </div>
+</body>
+</html>`;
+
+  const subject = `🆕 New bimblyai signup — ${business.name} (${label})`;
+  const text = `New signup:\n\nBusiness: ${business.name}\nOwner: ${business.owner_name || 'N/A'}\nEmail: ${business.email}\nPhone: ${business.phone || 'N/A'}\nTwilio: ${business.twilio_phone || 'N/A'}\nVapi: ${business.vapi_assistant_id || 'N/A'}\nType: ${business.business_type || 'N/A'}\nPlan: ${label}\nID: ${business.id}`;
 
   try {
     await sgMail.send({
-      to: 'hello@bimblyai.com',
+      to: 'vaghefi@gmail.com',
       from: FROM,
-      subject: `New bimblyai signup: ${business.name}`,
+      subject,
+      html,
       text,
     });
     console.log(`📧 Internal signup notification sent for ${business.name}`);
