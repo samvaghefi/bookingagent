@@ -820,6 +820,8 @@ function OnboardingPage({ setPage }) {
   const [saving, setSaving] = useState(false);
   const [newBarber, setNewBarber] = useState('');
   const [bizPhone, setBizPhone]   = useState(null);
+  const [stepError, setStepError] = useState('');
+  const [loadingData, setLoadingData] = useState(true);
   const [data, setData]   = useState({
     name:          '',
     phone:         '',
@@ -834,8 +836,43 @@ function OnboardingPage({ setPage }) {
 
   const setField = (key, val) => setData(d => ({ ...d, [key]: val }));
 
-  // Reset services when business type changes
+  // Pre-populate form with existing business data on mount
   useEffect(() => {
+    const BIZ_TYPE_MAP = {
+      'barbershop': 'Barbershop',
+      'hair-salon': 'Hair Salon',
+      'hair salon': 'Hair Salon',
+      'nail-salon': 'Nail Salon',
+      'nail salon': 'Nail Salon',
+    };
+    Promise.all([
+      apiFetch('/api/business').then(r => r.json()),
+      apiFetch('/api/services').then(r => r.json()),
+    ])
+      .then(([b, s]) => {
+        const biz = b.business || b;
+        const svcs = s.services || s || [];
+        const bizType = BIZ_TYPE_MAP[(biz.business_type || '').toLowerCase()] || biz.business_type || 'Barbershop';
+        setData(d => ({
+          ...d,
+          name:          biz.name          || d.name,
+          phone:         biz.phone         || d.phone,
+          address:       biz.address       || d.address,
+          ai_name:       biz.ai_name       || d.ai_name,
+          business_type: bizType,
+          timezone:      biz.timezone      || d.timezone,
+          barbers:       biz.barbers       || d.barbers,
+          services:      svcs.length > 0 ? svcs : (SERVICE_DEFAULTS[bizType] || SERVICE_DEFAULTS['Barbershop']),
+        }));
+      })
+      .catch(() => {})
+      .finally(() => setLoadingData(false));
+  }, []);
+
+  // Reset services when business type changes (skip on initial mount — handled by pre-populate effect)
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) { isFirstRender.current = false; return; }
     setData(d => ({ ...d, services: SERVICE_DEFAULTS[d.business_type] || SERVICE_DEFAULTS['Barbershop'] }));
   }, [data.business_type]);
 
@@ -890,6 +927,25 @@ function OnboardingPage({ setPage }) {
     } catch {}
     setSaving(false);
   };
+
+  const validate = (stepNum) => {
+    if (stepNum === 1) {
+      if (!data.name.trim()) return 'Business Name is required.';
+      if (!data.phone.trim()) return 'Business Phone is required.';
+      if (!data.business_type) return 'Business Type is required.';
+      if (!data.timezone) return 'Timezone is required.';
+    }
+    if (stepNum === 2) {
+      if (data.services.length === 0) return 'Add at least one service.';
+      for (const svc of data.services) {
+        if (!svc.name.trim()) return 'Each service must have a name.';
+        if (!svc.price) return 'Each service must have a price.';
+      }
+    }
+    return '';
+  };
+
+  if (loadingData) return <Spinner />;
 
   return (
     <div className="onboarding-wrap">
@@ -1058,12 +1114,21 @@ function OnboardingPage({ setPage }) {
           </div>
         )}
 
+        {stepError && (
+          <div style={{ color: '#ef4444', fontSize: 13, padding: '8px 0 0', marginTop: 4 }}>{stepError}</div>
+        )}
+
         <div className="step-actions">
           {step > 1 && (
-            <button className="btn-ghost" onClick={() => setStep(s => s - 1)}>Back</button>
+            <button className="btn-ghost" onClick={() => { setStepError(''); setStep(s => s - 1); }}>Back</button>
           )}
           {step < 4 && (
-            <button className="btn-primary" onClick={() => setStep(s => s + 1)}>
+            <button className="btn-primary" onClick={() => {
+              const err = validate(step);
+              if (err) { setStepError(err); return; }
+              setStepError('');
+              setStep(s => s + 1);
+            }}>
               Continue →
             </button>
           )}
