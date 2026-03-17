@@ -52,14 +52,14 @@ router.get('/intel/login', (req, res) => {
 router.post('/intel/login', (req, res) => {
   const { username, password } = req.body || {};
   console.log('DEBUG LOGIN:', {
-    envUser: (process.env.INTEL_USERNAME || '').substring(0, 3),
-    envPass: (process.env.INTEL_PASSWORD || '').substring(0, 3),
-    submittedUser: (username || '').substring(0, 3),
-    submittedPass: (password || '').substring(0, 3),
-    bodyKeys: Object.keys(req.body || {}),
-    contentType: req.headers['content-type'],
+    envUser: (process.env.INTEL_USERNAME || '').trim().substring(0, 6),
+    envPass: (process.env.INTEL_PASSWORD || '').trim().substring(0, 6),
+    envPassLength: (process.env.INTEL_PASSWORD || '').trim().length,
+    submittedUser: (username || '').trim().substring(0, 6),
+    submittedPass: (password || '').trim().substring(0, 6),
+    submittedPassLength: (password || '').trim().length,
     match: username.trim() === (process.env.INTEL_USERNAME || '').trim() &&
-    password.trim() === (process.env.INTEL_PASSWORD || '').trim(),
+           password.trim() === (process.env.INTEL_PASSWORD || '').trim(),
   });
   if (
     username === process.env.INTEL_USERNAME &&
