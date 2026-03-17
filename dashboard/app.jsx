@@ -880,6 +880,8 @@ function OnboardingPage({ setPage }) {
   const [bizPhone, setBizPhone]   = useState(null);
   const [stepError, setStepError] = useState('');
   const [loadingData, setLoadingData] = useState(true);
+  const [plan, setPlan]               = useState('solo');
+  const [ownerName, setOwnerName]     = useState('');
   const [data, setData]   = useState({
     name:          '',
     phone:         '',
@@ -911,6 +913,8 @@ function OnboardingPage({ setPage }) {
         const biz = b.business || b;
         const svcs = s.services || s || [];
         const bizType = BIZ_TYPE_MAP[(biz.business_type || '').toLowerCase()] || biz.business_type || 'Barbershop';
+        setPlan(biz.plan || 'solo');
+        setOwnerName(biz.owner_name || '');
         setData({
           name:           biz.name          || '',
           phone:          biz.phone         || '',
@@ -919,7 +923,9 @@ function OnboardingPage({ setPage }) {
           business_type:  bizType,
           timezone:       biz.timezone      || 'America/Toronto',
           business_hours: biz.business_hours || {},
-          barbers:        biz.barbers        || [],
+          barbers:        biz.barbers && biz.barbers.length > 0
+                            ? biz.barbers
+                            : (biz.plan !== 'solo' && biz.owner_name ? [biz.owner_name] : []),
           services:       svcs.length > 0 ? svcs : (SERVICE_DEFAULTS[bizType] || SERVICE_DEFAULTS['Barbershop']),
         });
       })
@@ -976,11 +982,10 @@ function OnboardingPage({ setPage }) {
           barbers:        data.barbers,
         }),
       });
-      for (const svc of data.services) {
-        if (svc.name) {
-          await apiFetch('/api/services', { method: 'POST', body: JSON.stringify(svc) }).catch(() => {});
-        }
-      }
+      await apiFetch('/api/services/replace', {
+        method: 'PUT',
+        body: JSON.stringify({ services: data.services }),
+      });
       setPage('home');
     } catch {}
     setSaving(false);
@@ -1009,7 +1014,7 @@ function OnboardingPage({ setPage }) {
     <div className="onboarding-wrap">
       <div className="onboarding-card">
         <div className="step-indicator">
-          {[1, 2, 3, 4].map(s => (
+          {(plan === 'solo' ? [1, 2, 3] : [1, 2, 3, 4]).map(s => (
             <div key={s} className={`step-dot ${s === step ? 'active' : s < step ? 'done' : ''}`}>
               {s < step ? '✓' : s}
             </div>
@@ -1111,41 +1116,52 @@ function OnboardingPage({ setPage }) {
           </div>
         )}
 
-        {/* Step 3 */}
-        {step === 3 && (
+        {/* Step 3 — team (solo skips this, goes to step 3 = final/forwarding) */}
+        {step === 3 && plan !== 'solo' && (
           <div className="step-content">
             <h2>{TEAM_LABEL[data.business_type] || 'Who is your team?'}</h2>
             <p className="step-sub">
               Customers can request a specific team member when they call.
+              {plan === 'starter' && <span style={{ display: 'block', fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Starter plan includes up to 4 team members.</span>}
             </p>
             <div className="barbers-list" style={{ marginBottom: 16 }}>
               {data.barbers.map((name, i) => (
                 <div key={i} className="barber-chip">
                   {name}
-                  <button
-                    className="chip-remove"
-                    onClick={() => setData(d => ({ ...d, barbers: d.barbers.filter((_, j) => j !== i) }))}
-                  >×</button>
+                  {/* Prevent removing the owner (index 0) */}
+                  {i > 0 && (
+                    <button
+                      className="chip-remove"
+                      onClick={() => setData(d => ({ ...d, barbers: d.barbers.filter((_, j) => j !== i) }))}
+                    >×</button>
+                  )}
                 </div>
               ))}
               {data.barbers.length === 0 && (
-                <span style={{ color: '#9ca3af', fontSize: 13 }}>No team members added yet.</span>
+                <span style={{ color: '#9ca3af', fontSize: 13 }}>No team members yet.</span>
               )}
             </div>
-            <div className="add-barber-row" style={{ padding: 0 }}>
-              <input
-                placeholder="Name"
-                value={newBarber}
-                onChange={e => setNewBarber(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && addBarber()}
-              />
-              <button className="btn-outline" onClick={addBarber}>Add</button>
-            </div>
+            {(plan === 'pro' || data.barbers.length < 4) && (
+              <div className="add-barber-row" style={{ padding: 0 }}>
+                <input
+                  placeholder="Name"
+                  value={newBarber}
+                  onChange={e => setNewBarber(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addBarber()}
+                />
+                <button className="btn-outline" onClick={addBarber}>Add</button>
+              </div>
+            )}
+            {plan === 'starter' && data.barbers.length >= 4 && (
+              <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>Team member limit reached for Starter plan.</p>
+            )}
           </div>
         )}
 
-        {/* Step 4 */}
-        {step === 4 && (
+        {/* Step 3 (solo) = forwarding step */}
+
+        {/* Step 4 (or step 3 for solo) */}
+        {((plan === 'solo' && step === 3) || (plan !== 'solo' && step === 4)) && (
           <div className="step-content">
             <h2>You're almost live!</h2>
             <p className="step-sub">
@@ -1178,19 +1194,24 @@ function OnboardingPage({ setPage }) {
 
         <div className="step-actions">
           {step > 1 && (
-            <button className="btn-ghost" onClick={() => { setStepError(''); setStep(s => s - 1); }}>Back</button>
+            <button className="btn-ghost" onClick={() => {
+              setStepError('');
+              // Solo: back from step 3 goes to step 2 (skipping team step)
+              setStep(s => s - 1);
+            }}>Back</button>
           )}
-          {step < 4 && (
+          {((plan === 'solo' && step < 3) || (plan !== 'solo' && step < 4)) && (
             <button className="btn-primary" onClick={() => {
               const err = validate(step);
               if (err) { setStepError(err); return; }
               setStepError('');
+              // Solo: jump from step 2 to step 3 (forwarding), skip team step
               setStep(s => s + 1);
             }}>
               Continue →
             </button>
           )}
-          {step === 4 && (
+          {((plan === 'solo' && step === 3) || (plan !== 'solo' && step === 4)) && (
             <button className="btn-primary" onClick={complete} disabled={saving}>
               {saving ? 'Setting up...' : "I've forwarded my number →"}
             </button>
