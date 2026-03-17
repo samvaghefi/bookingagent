@@ -851,7 +851,8 @@ app.get('/signup', (req, res) => {
             businessName: document.getElementById('businessName').value.trim(),
             email: document.getElementById('email').value.trim(),
             phone: document.getElementById('phone').value.trim(),
-            businessType: document.getElementById('businessType').value
+            businessType: document.getElementById('businessType').value,
+            plan: (document.getElementById('plan') ? document.getElementById('plan').value : 'solo')
           })
         });
 
@@ -905,7 +906,7 @@ app.post('/signup', async (req, res) => {
     console.error('  message:', err.message);
     console.error('  type:', err.type);
     console.error('  stack:', err.stack);
-    return res.status(500).json({ error: 'Failed to create checkout session. Please try again.' });
+    return res.status(500).json({ error: err.message || 'Failed to create checkout session. Please try again.' });
   }
 });
 
@@ -984,5 +985,14 @@ app.listen(PORT, () => {
   }
   if (!process.env.JWT_SECRET) {
     console.warn('⚠️  JWT_SECRET is not set — dashboard authentication will fail. Set this in Render environment variables.');
+  }
+  if (!process.env.STRIPE_SOLO_PRICE_ID) {
+    console.warn('⚠️  STRIPE_SOLO_PRICE_ID is not set — Solo plan signups will fail.');
+  }
+  if (!process.env.STRIPE_STARTER_PRICE_ID) {
+    console.warn('⚠️  STRIPE_STARTER_PRICE_ID is not set — Starter plan signups will fail.');
+  }
+  if (!process.env.STRIPE_PRO_PRICE_ID) {
+    console.warn('⚠️  STRIPE_PRO_PRICE_ID is not set — Pro plan signups will fail.');
   }
 });
