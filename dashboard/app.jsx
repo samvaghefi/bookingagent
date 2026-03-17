@@ -750,9 +750,9 @@ function BillingPage() {
     flex: 1,
     display: 'flex',
     flexDirection: 'column',
-    border: '1.5px solid #e5e7eb',
+    border: '1px solid #e5e7eb',
     borderRadius: 12,
-    padding: '28px',
+    padding: '24px',
     minHeight: 380,
     background: '#fff',
   };
@@ -825,7 +825,7 @@ function BillingPage() {
 
         {/* Right: Upgrade card or Pro message */}
         {upgradeInfo ? (
-          <div style={{ ...CARD_STYLE, background: '#F3F0FF', border: '1.5px solid #d4c9ff' }}>
+          <div style={{ ...CARD_STYLE, background: '#F3F0FF', border: '1px solid #e5e7eb' }}>
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 22, fontWeight: 800, color: '#1f2937', marginBottom: 2 }}>
                 Bimbly {upgradeInfo.label}
@@ -840,18 +840,18 @@ function BillingPage() {
               {(UPGRADE_FEATURES[plan] || []).map((f, i) => <li key={i}>{f}</li>)}
             </ul>
 
-            <div style={{ marginTop: 24 }}>
-              <a
-                href={`/billing/checkout?businessId=${business?.id}&plan=${upgradeInfo.to}`}
+            <div style={{ marginTop: 'auto', paddingTop: 24 }}>
+              <button
                 className="btn-primary"
-                style={{ display: 'block', textDecoration: 'none', textAlign: 'center' }}
+                style={{ width: '100%' }}
+                onClick={() => window.location.href = `/billing/checkout?businessId=${business?.id}&plan=${upgradeInfo.to}`}
               >
                 Upgrade Now
-              </a>
+              </button>
             </div>
           </div>
         ) : (
-          <div style={{ ...CARD_STYLE, background: '#F3F0FF', border: '1.5px solid #d4c9ff', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+          <div style={{ ...CARD_STYLE, background: '#F3F0FF', border: '1px solid #e5e7eb', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: '#10b981', marginBottom: 8 }}>You're on our best plan.</div>
             <div style={{ fontSize: 14, color: '#6b7280' }}>Thank you for being a Pro member!</div>
           </div>
