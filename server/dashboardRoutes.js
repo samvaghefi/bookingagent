@@ -264,7 +264,7 @@ router.put('/api/services/replace', async (req, res) => {
   }
 
   try {
-    // Delete all existing services for this business
+    // Step 1: Delete ALL existing services for this business
     const { error: deleteError } = await supabase
       .from('services')
       .delete()
@@ -272,23 +272,29 @@ router.put('/api/services/replace', async (req, res) => {
 
     if (deleteError) throw deleteError;
 
-    // Insert new services (skip entries with no name)
+    // Step 2: Build insert payload — strip id/business_id/created_at so Supabase generates fresh IDs
     const toInsert = services
-      .filter(s => s.name && s.name.trim())
       .map(s => ({
         business_id:      req.business.id,
-        name:             s.name.trim(),
-        price:            s.price || null,
-        duration_minutes: s.duration_minutes || null,
+        name:             s.name,
+        price:            s.price,
+        duration_minutes: s.duration_minutes,
         description:      s.description || null,
-      }));
+      }))
+      .filter(s => s.name && s.name.trim());
 
+    // Step 3: Insert (only if there's something to insert)
+    let inserted = [];
     if (toInsert.length > 0) {
-      const { error: insertError } = await supabase.from('services').insert(toInsert);
+      const { data, error: insertError } = await supabase
+        .from('services')
+        .insert(toInsert)
+        .select();
       if (insertError) throw insertError;
+      inserted = data || [];
     }
 
-    res.json({ success: true, count: toInsert.length });
+    res.json({ success: true, count: inserted.length, services: inserted });
   } catch (err) {
     console.error('PUT /api/services/replace error:', err.message);
     res.status(500).json({ error: err.message });
