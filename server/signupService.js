@@ -58,7 +58,7 @@ async function createBusiness(data) {
 
   if (error) throw error;
 
-  console.log(`🏪 New business created: ${business.name} ${business.id} (${business.city || ''}, ${business.province || ''})`);
+  console.log(`🏪 New business created: ${business.name} | ${business.city || 'no city'}, ${business.province || 'no province'} | ${business.id}`);
   return business;
 }
 
