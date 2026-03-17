@@ -353,7 +353,7 @@ function buildHtml(allResults, analysis, isFirstRun, date, briefOnly = false) {
     : `<div style="background:#1e293b;border-radius:8px;padding:20px;margin-top:24px;color:#94a3b8;font-size:13px;">Strategic analysis unavailable for this run.</div>`;
 
   if (briefOnly) {
-    return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;max-width:680px;margin:0 auto;padding:16px;background:#f8fafc;">
+    return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:16px;background:#f8fafc;">
       <div style="background:#1e293b;padding:20px 24px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;">
         <img src="https://bimblyai.com/assets/bimblyai-logo-primary.svg" alt="bimblyai" style="height:64px;display:block;">
         <span style="font-size:13px;color:#9ca3af;">${today}</span>
@@ -415,7 +415,7 @@ function buildHtml(allResults, analysis, isFirstRun, date, briefOnly = false) {
     ? '<p style="color:#111827;font-size:14px;">No competitor changes detected today.</p>'
     : '';
 
-  return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;max-width:680px;margin:0 auto;padding:16px;background:#f8fafc;">
+  return `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;max-width:900px;margin:0 auto;padding:16px;background:#f8fafc;">
     <div style="background:#1e293b;padding:20px 24px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;">
       <img src="https://bimblyai.com/assets/bimblyai-logo-primary.svg" alt="bimblyai" style="height:64px;display:block;">
       <span style="font-size:13px;color:#9ca3af;">${today}${isFirstRun ? ' (Baseline)' : ''}</span>
