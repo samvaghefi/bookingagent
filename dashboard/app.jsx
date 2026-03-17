@@ -558,7 +558,7 @@ function SettingsPage() {
       </div>
 
       {/* ── Barbers / Team ── */}
-      <div className="card">
+      {business?.plan !== 'solo' && <div className="card">
         <div className="card-header">Your Team</div>
         <p className="card-note">
           These names are used by your AI receptionist when customers request a specific barber.
@@ -566,11 +566,13 @@ function SettingsPage() {
         <div className="barbers-list">
           {barbers.map((name, i) => (
             <div key={i} className="barber-chip">
-              {name}
-              <button
-                className="chip-remove"
-                onClick={() => setBarbers(b => b.filter((_, j) => j !== i))}
-              >×</button>
+              {name}{i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
+              {i !== 0 && (
+                <button
+                  className="chip-remove"
+                  onClick={() => setBarbers(b => b.filter((_, j) => j !== i))}
+                >×</button>
+              )}
             </div>
           ))}
           {barbers.length === 0 && (
@@ -606,7 +608,7 @@ function SettingsPage() {
             {saving ? 'Saving...' : 'Save Team'}
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* ── AI Agent Settings ── */}
       <div className="card">
@@ -1181,7 +1183,7 @@ function OnboardingPage({ setPage }) {
             <div className="barbers-list" style={{ marginBottom: 16 }}>
               {data.barbers.map((name, i) => (
                 <div key={i} className="barber-chip">
-                  {name}
+                  {name}{i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
                   {/* Prevent removing the owner (index 0) */}
                   {i > 0 && (
                     <button
