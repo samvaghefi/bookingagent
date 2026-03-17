@@ -1062,8 +1062,8 @@ p{color:#6b7280;line-height:1.6;}</style></head>
 // ── POST /onboarding/complete ────────────────────────────────────────────────
 // Called by the dashboard after the onboarding wizard finishes.
 // Updates the Vapi assistant with the finalised services and barbers.
-const { authenticateToken } = require('./authMiddleware');
-app.post('/onboarding/complete', authenticateToken, async (req, res) => {
+const authMiddlewareFn = require('./authMiddleware');
+app.post('/onboarding/complete', authMiddlewareFn, async (req, res) => {
   try {
     const businessId = req.business.id;
     const { services, barbers, timezone, supported_languages } = req.body;
