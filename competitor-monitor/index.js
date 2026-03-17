@@ -292,7 +292,7 @@ Respond with ONLY a valid JSON object (no markdown, no commentary) with these fi
   const response = await axios.post(
     'https://api.anthropic.com/v1/messages',
     {
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       max_tokens: 1000,
       system: 'You are a sharp, opinionated product strategist advising an early-stage AI SaaS startup called Bimbly AI. You will be given a summary of what Bimbly\'s competitors have done in the last 24 hours and Bimbly\'s current state. Write a concise strategic analysis. Be direct. No fluff. No em dashes. Use plain language a founder can act on.',
       messages: [{ role: 'user', content: userPrompt }],
