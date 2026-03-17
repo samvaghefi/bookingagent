@@ -60,8 +60,8 @@ router.put('/api/business', async (req, res) => {
     if (error) throw error;
     res.json({ business });
   } catch (err) {
-    console.error('PUT /api/business error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('PUT /api/business error:', err);
+    res.status(500).json({ error: err.message || JSON.stringify(err) });
   }
 });
 
@@ -255,6 +255,45 @@ router.post('/api/services', async (req, res) => {
   }
 });
 
+// PUT /api/services/replace — must be defined BEFORE /:id to avoid Express matching 'replace' as :id
+router.put('/api/services/replace', async (req, res) => {
+  const { services } = req.body;
+  if (!Array.isArray(services)) {
+    return res.status(400).json({ error: 'services must be an array.' });
+  }
+
+  try {
+    // Delete all existing services for this business
+    const { error: deleteError } = await supabase
+      .from('services')
+      .delete()
+      .eq('business_id', req.business.id);
+
+    if (deleteError) throw deleteError;
+
+    // Insert new services (skip entries with no name)
+    const toInsert = services
+      .filter(s => s.name && s.name.trim())
+      .map(s => ({
+        business_id:      req.business.id,
+        name:             s.name.trim(),
+        price:            s.price || null,
+        duration_minutes: s.duration_minutes || null,
+        description:      s.description || null,
+      }));
+
+    if (toInsert.length > 0) {
+      const { error: insertError } = await supabase.from('services').insert(toInsert);
+      if (insertError) throw insertError;
+    }
+
+    res.json({ success: true, count: toInsert.length });
+  } catch (err) {
+    console.error('PUT /api/services/replace error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PUT /api/services/:id
 router.put('/api/services/:id', async (req, res) => {
   try {
@@ -311,43 +350,7 @@ router.delete('/api/services/:id', async (req, res) => {
 });
 
 // PUT /api/services/replace — delete all existing services and insert new list atomically
-router.put('/api/services/replace', async (req, res) => {
-  const { services } = req.body;
-  if (!Array.isArray(services)) {
-    return res.status(400).json({ error: 'services must be an array.' });
-  }
 
-  try {
-    // Delete all existing services for this business
-    const { error: deleteError } = await supabase
-      .from('services')
-      .delete()
-      .eq('business_id', req.business.id);
-
-    if (deleteError) throw deleteError;
-
-    // Insert new services (skip entries with no name)
-    const toInsert = services
-      .filter(s => s.name && s.name.trim())
-      .map(s => ({
-        business_id:      req.business.id,
-        name:             s.name.trim(),
-        price:            s.price || null,
-        duration_minutes: s.duration_minutes || null,
-        description:      s.description || null,
-      }));
-
-    if (toInsert.length > 0) {
-      const { error: insertError } = await supabase.from('services').insert(toInsert);
-      if (insertError) throw insertError;
-    }
-
-    res.json({ success: true, count: toInsert.length });
-  } catch (err) {
-    console.error('PUT /api/services/replace error:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // ── Billing ───────────────────────────────────────────────────────────────────
 

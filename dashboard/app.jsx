@@ -746,99 +746,118 @@ function BillingPage() {
     starter: ['Unlimited team members', 'Priority support', 'Advanced multi-location analytics', 'Custom AI voice & persona'],
   };
 
+  const CARD_STYLE = {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    border: '1.5px solid #e5e7eb',
+    borderRadius: 12,
+    padding: '28px',
+    minHeight: 380,
+    background: '#fff',
+  };
+
   return (
     <div className="page-content">
-      {/* Current plan card */}
-      <div className="card billing-card">
-        <div className="billing-header">
-          <div>
-            <div className="billing-plan" style={{ fontSize: 22, fontWeight: 800, color: '#1f2937', marginBottom: 2 }}>
-              Bimbly {planLabel}
+      <style>{`@media(max-width:768px){.billing-row{flex-direction:column!important;}}`}</style>
+
+      <div className="billing-row" style={{ display: 'flex', gap: 24, alignItems: 'stretch' }}>
+
+        {/* Left: Current plan card */}
+        <div style={CARD_STYLE}>
+          {/* Header */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#1f2937', marginBottom: 2 }}>
+                Bimbly {planLabel}
+              </div>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#534AB7' }}>
+                {displayAmount != null ? `CA$${Number(displayAmount).toFixed(0)}` : '—'}
+                <span style={{ fontSize: 15, fontWeight: 400, color: '#6b7280' }}> / month</span>
+              </div>
+              {isTrial && (
+                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>after trial ends</div>
+              )}
             </div>
-            <div className="billing-amount" style={{ fontSize: 28, fontWeight: 700, color: '#534AB7' }}>
-              {displayAmount != null ? `CA$${Number(displayAmount).toFixed(0)}` : '—'}
-              <span style={{ fontSize: 15, fontWeight: 400, color: '#6b7280' }}> / month</span>
+            <span className="status-badge" style={{ background: statusInfo.color + '20', color: statusInfo.color }}>
+              {statusInfo.label}
+            </span>
+          </div>
+
+          {isTrial && trialEnd && (
+            <div style={{ background: '#f3f0ff', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
+              🎉 Your free trial ends <strong>{trialEnd}</strong> — you'll be billed automatically.
             </div>
-            {isTrial && (
-              <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>after trial ends</div>
+          )}
+          {periodEnd && !isTrial && (
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
+              Next billing date: <strong>{periodEnd}</strong>
+            </div>
+          )}
+
+          {/* Features */}
+          <div style={{ flex: 1 }}>
+            {features.map((f, i) => (
+              <div key={i} className="feature-item">
+                <span className="feature-check">✓</span>
+                {f}
+              </div>
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div style={{ marginTop: 20 }}>
+            {status === 'cancelling' && (
+              <div style={{ fontSize: 13, color: '#f59e0b' }}>
+                Subscription cancels at end of billing period.
+              </div>
+            )}
+            {status !== 'cancelled' && status !== 'cancelling' && (
+              <button
+                style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 12, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
+                onClick={() => setShowModal(true)}
+              >
+                Cancel subscription
+              </button>
             )}
           </div>
-          <span
-            className="status-badge"
-            style={{ background: statusInfo.color + '20', color: statusInfo.color, alignSelf: 'flex-start' }}
-          >
-            {statusInfo.label}
-          </span>
         </div>
 
-        {isTrial && trialEnd && (
-          <div className="billing-info-row" style={{ background: '#f3f0ff', borderRadius: 8, padding: '10px 16px', margin: '0 28px 16px', fontSize: 13 }}>
-            🎉 Your free trial ends <strong>{trialEnd}</strong> — no action needed, you'll be billed automatically.
-          </div>
-        )}
-        {periodEnd && !isTrial && (
-          <div className="billing-info-row">
-            Next billing date: <strong>{periodEnd}</strong>
-          </div>
-        )}
-
-        <div className="features-list">
-          {features.map((f, i) => (
-            <div key={i} className="feature-item">
-              <span className="feature-check">✓</span>
-              {f}
-            </div>
-          ))}
-        </div>
-
-        {status === 'cancelling' && (
-          <div style={{ padding: '16px 28px', fontSize: 13, color: '#f59e0b' }}>
-            Your subscription is set to cancel at the end of the billing period.
-          </div>
-        )}
-
-        {status !== 'cancelled' && status !== 'cancelling' && (
-          <div style={{ padding: '8px 28px 20px', textAlign: 'right' }}>
-            <button
-              style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}
-              onClick={() => setShowModal(true)}
-            >
-              Cancel subscription
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Upgrade card */}
-      {upgradeInfo && (
-        <div style={{ marginTop: 20, background: '#F3F0FF', borderRadius: 12, padding: '24px 28px' }}>
-          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: 1, color: '#534AB7', textTransform: 'uppercase', marginBottom: 8 }}>Ready to grow?</div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-            <div style={{ flex: 1, minWidth: 200 }}>
-              <div style={{ fontSize: 20, fontWeight: 800, color: '#1f2937', marginBottom: 4 }}>
-                {upgradeInfo.label} <span style={{ color: '#534AB7' }}>{upgradeInfo.price}</span>
+        {/* Right: Upgrade card or Pro message */}
+        {upgradeInfo ? (
+          <div style={{ ...CARD_STYLE, background: '#F3F0FF', border: '1.5px solid #d4c9ff' }}>
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#1f2937', marginBottom: 2 }}>
+                Bimbly {upgradeInfo.label}
               </div>
-              <ul style={{ margin: '10px 0 0', padding: '0 0 0 18px', fontSize: 13, color: '#374151', lineHeight: 1.8 }}>
-                {(UPGRADE_FEATURES[plan] || []).map((f, i) => <li key={i}>{f}</li>)}
-              </ul>
+              <div style={{ fontSize: 28, fontWeight: 700, color: '#534AB7' }}>
+                {upgradeInfo.price}
+                <span style={{ fontSize: 15, fontWeight: 400, color: '#6b7280' }}> / month</span>
+              </div>
             </div>
-            <a
-              href={`/billing/checkout?businessId=${business?.id}&plan=${upgradeInfo.to}`}
-              className="btn-primary"
-              style={{ display: 'inline-block', textDecoration: 'none', alignSelf: 'center', whiteSpace: 'nowrap' }}
-            >
-              Upgrade Now
-            </a>
-          </div>
-        </div>
-      )}
 
-      {plan === 'pro' && (
-        <div className="card" style={{ marginTop: 16, textAlign: 'center', padding: '24px 28px' }}>
-          <div style={{ fontSize: 18, fontWeight: 700, color: '#10b981', marginBottom: 4 }}>You're on our best plan.</div>
-          <div style={{ fontSize: 14, color: '#6b7280' }}>Thank you for being a Pro member!</div>
-        </div>
-      )}
+            <ul style={{ flex: 1, margin: '0', padding: '0 0 0 18px', fontSize: 14, color: '#374151', lineHeight: 2 }}>
+              {(UPGRADE_FEATURES[plan] || []).map((f, i) => <li key={i}>{f}</li>)}
+            </ul>
+
+            <div style={{ marginTop: 24 }}>
+              <a
+                href={`/billing/checkout?businessId=${business?.id}&plan=${upgradeInfo.to}`}
+                className="btn-primary"
+                style={{ display: 'block', textDecoration: 'none', textAlign: 'center' }}
+              >
+                Upgrade Now
+              </a>
+            </div>
+          </div>
+        ) : (
+          <div style={{ ...CARD_STYLE, background: '#F3F0FF', border: '1.5px solid #d4c9ff', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#10b981', marginBottom: 8 }}>You're on our best plan.</div>
+            <div style={{ fontSize: 14, color: '#6b7280' }}>Thank you for being a Pro member!</div>
+          </div>
+        )}
+
+      </div>
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
