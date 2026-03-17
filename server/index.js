@@ -3,6 +3,8 @@ require('dotenv').config();
 //   INTEL_USERNAME        — username for /intel login
 //   INTEL_PASSWORD        — password for /intel login
 //   INTEL_SESSION_SECRET  — random string to sign session cookies
+// Required env vars (provisioning):
+//   VAPI_API_KEY           — Vapi API key for assistant management
 const express = require('express');
 const path = require('path');
 const cors = require('cors');
@@ -13,6 +15,8 @@ const { getAuthUrl, getTokensFromCode, createCalendarEvent } = require('./calend
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const { createCheckoutSession } = require('./billingService');
 const { createBusiness } = require('./signupService');
+const { provisionPhoneNumber, releasePhoneNumber } = require('./twilioProvisioningService');
+const { createVapiAssistant, updateVapiAssistant } = require('./vapiService');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const dashboardRoutes = require('./dashboardRoutes');
@@ -35,6 +39,98 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.options(/(.*)/, cors(corsOptions));
+
+// ── Provisioning: checkout.session.completed ─────────────────────────────────
+async function handleCheckoutCompleted(session) {
+  const businessId = session.metadata?.business_id;
+  if (!businessId) {
+    console.error('❌ No business_id in checkout session metadata');
+    return;
+  }
+
+  const { data: business } = await supabase
+    .from('businesses')
+    .select('*')
+    .eq('id', businessId)
+    .single();
+
+  if (!business) {
+    console.error('❌ Business not found for checkout session:', businessId);
+    return;
+  }
+
+  // Apply plan from Stripe metadata if missing on the record
+  if (!business.plan && session.metadata?.plan) {
+    business.plan = session.metadata.plan;
+  }
+
+  let twilioPhone = null;
+  let vapiAssistantId = null;
+
+  try {
+    // 1. Provision Twilio phone number
+    console.log('📞 Provisioning Twilio number for:', business.name);
+    twilioPhone = await provisionPhoneNumber(business);
+
+    // 2. Persist phone number before Vapi creation so the assistant config has it
+    await supabase.from('businesses').update({ twilio_phone: twilioPhone }).eq('id', businessId);
+    const businessWithPhone = { ...business, twilio_phone: twilioPhone };
+
+    // 3. Create Vapi assistant
+    console.log('🤖 Creating Vapi assistant for:', business.name);
+    vapiAssistantId = await createVapiAssistant(businessWithPhone);
+
+    // 4. Fully activate the business
+    const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    await supabase.from('businesses').update({
+      is_active: true,
+      subscription_status: 'trial',
+      trial_ends_at: trialEndsAt,
+      stripe_customer_id: session.customer,
+      stripe_subscription_id: session.subscription,
+      twilio_phone: twilioPhone,
+      vapi_assistant_id: vapiAssistantId,
+    }).eq('id', businessId);
+
+    // 5. Send welcome email and internal notification
+    const fullyProvisioned = { ...businessWithPhone, vapi_assistant_id: vapiAssistantId, trial_ends_at: trialEndsAt };
+    await sendWelcomeEmail(fullyProvisioned);
+    await sendInternalSignupNotification(fullyProvisioned);
+
+    console.log(`✅ Business fully provisioned: ${business.name} | Twilio: ${twilioPhone} | Vapi: ${vapiAssistantId}`);
+
+  } catch (err) {
+    console.error('❌ Provisioning failed for', business.name, ':', err.message);
+
+    // Rollback: release Twilio number if Vapi creation failed partway through
+    if (twilioPhone && !vapiAssistantId) {
+      try {
+        await releasePhoneNumber(twilioPhone);
+        console.log('↩️  Rolled back Twilio number:', twilioPhone);
+      } catch (rollbackErr) {
+        console.error('❌ Rollback failed:', rollbackErr.message);
+      }
+    }
+
+    // Mark as failed so it can be retried or investigated
+    await supabase.from('businesses')
+      .update({ subscription_status: 'provisioning_failed' })
+      .eq('id', businessId);
+
+    // Alert internal team
+    await sendOwnerEmail(
+      business,
+      `Provisioning failed: ${business.name}`,
+      `Provisioning failed for ${business.name} (${business.email}).
+
+Error: ${err.message}
+
+Business ID: ${businessId}
+
+Check Render logs for full stack trace.`
+    );
+  }
+}
 
 // ── Stripe webhook (must be before express.json() to get raw body) ────────────
 app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
@@ -59,33 +155,7 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 
   try {
     if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const businessId = session.metadata?.business_id;
-      if (businessId) {
-        await supabase.from('businesses').update({
-          stripe_customer_id: session.customer,
-          stripe_subscription_id: session.subscription,
-          subscription_status: 'trial',
-          is_active: true
-        }).eq('id', businessId);
-        console.log(`✅ Trial activated for business: ${businessId}`);
-
-        // Fetch business details for welcome emails (include plan)
-        const { data: business } = await supabase
-          .from('businesses')
-          .select('id, name, owner_name, email, phone, business_type, plan')
-          .eq('id', businessId)
-          .single();
-
-        // Also pull plan from Stripe metadata as fallback
-        if (business) {
-          if (!business.plan && session.metadata?.plan) {
-            business.plan = session.metadata.plan;
-          }
-          await sendWelcomeEmail(business);
-          await sendInternalSignupNotification(business);
-        }
-      }
+      await handleCheckoutCompleted(event.data.object);
     }
 
     else if (event.type === 'customer.subscription.deleted') {
@@ -989,6 +1059,38 @@ p{color:#6b7280;line-height:1.6;}</style></head>
 });
 
 
+// ── POST /onboarding/complete ────────────────────────────────────────────────
+// Called by the dashboard after the onboarding wizard finishes.
+// Updates the Vapi assistant with the finalised services and barbers.
+const { authenticateToken } = require('./authMiddleware');
+app.post('/onboarding/complete', authenticateToken, async (req, res) => {
+  try {
+    const businessId = req.business.id;
+    const { services, barbers, timezone, supported_languages } = req.body;
+
+    const { data: business } = await supabase
+      .from('businesses')
+      .select('id, name, vapi_assistant_id, supported_languages, timezone')
+      .eq('id', businessId)
+      .single();
+
+    if (!business) return res.status(404).json({ error: 'Business not found' });
+
+    if (business.vapi_assistant_id) {
+      const merged = { ...business, timezone: timezone || business.timezone, supported_languages: supported_languages || business.supported_languages };
+      await updateVapiAssistant(business.vapi_assistant_id, merged, services || [], barbers || []);
+      console.log(`✅ Onboarding complete for ${business.name} — Vapi assistant updated`);
+    } else {
+      console.warn(`⚠️  Onboarding complete for ${business.name} — no Vapi assistant ID on record, skipping update`);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('POST /onboarding/complete error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
@@ -1011,6 +1113,9 @@ app.listen(PORT, () => {
   }
   if (!process.env.STRIPE_PRO_PRICE_ID) {
     console.warn('⚠️  STRIPE_PRO_PRICE_ID is not set — Pro plan signups will fail.');
+  }
+  if (!process.env.VAPI_API_KEY) {
+    console.warn('⚠️  VAPI_API_KEY is not set — Vapi assistant provisioning will fail.');
   }
   if (!process.env.INTEL_USERNAME || !process.env.INTEL_PASSWORD) {
     console.warn('⚠️  INTEL_USERNAME / INTEL_PASSWORD not set — /intel portal will not be accessible.');

@@ -1037,6 +1037,21 @@ function OnboardingPage({ setPage }) {
         method: 'PUT',
         body: JSON.stringify({ services: data.services }),
       });
+      // Notify server to update Vapi assistant with finalised config
+      try {
+        await apiFetch('/onboarding/complete', {
+          method: 'POST',
+          body: JSON.stringify({
+            services: data.services,
+            barbers: data.barbers,
+            timezone: data.timezone,
+            supported_languages: data.supported_languages,
+          }),
+        });
+      } catch (vapiErr) {
+        // Non-fatal — log but don't block the user from proceeding
+        console.warn('[complete] Vapi update failed (non-fatal):', vapiErr);
+      }
       setPage('home');
     } catch(err) {
       console.error('[complete] failed:', err);
