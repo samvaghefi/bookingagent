@@ -84,7 +84,7 @@ else
   check "success true" "$RESULT" '"success":true'
   check "business created" "$RESULT" '"businessCreated"'
   check "twilio provisioned" "$RESULT" '"twilioProvisioned"'
-  check "vapi created" "$RESULT" '"vapiCreated"'
+  check "vapi created" "$RESULT" '"vapiCreated":{"assistantId"'
   check "cleanup scheduled" "$RESULT" '"cleanupScheduled":true'
 fi
 echo ""

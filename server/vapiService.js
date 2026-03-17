@@ -11,6 +11,14 @@ const axios = require('axios');
 const VAPI_BASE = 'https://api.vapi.ai';
 const TEMPLATE_ASSISTANT_ID = '3f7183f9-4796-4104-8b08-015a4d675792';
 
+// Fields returned by GET /assistant that are NOT accepted by POST /assistant.
+// Sending these back causes a 400.
+const SERVER_ASSIGNED_FIELDS = [
+  'id', 'createdAt', 'updatedAt', 'orgId',
+  'phoneNumbers', 'phoneNumberId', 'squadId',
+  'isPublished', 'publishedAt', 'subscribedPlan',
+];
+
 function vapiHeaders() {
   return {
     Authorization: `Bearer ${process.env.VAPI_API_KEY}`,
@@ -18,14 +26,29 @@ function vapiHeaders() {
   };
 }
 
+// Extract a human-readable error message from an Axios error
+function vapiError(err) {
+  if (err.response) {
+    const body = JSON.stringify(err.response.data);
+    return `Vapi ${err.response.status}: ${body}`;
+  }
+  return err.message;
+}
+
 // ── createVapiAssistant ───────────────────────────────────────────────────────
 // Clones the template assistant and customises it for the given business.
 async function createVapiAssistant(business) {
   // 1. Fetch template config
-  const { data: template } = await axios.get(
-    `${VAPI_BASE}/assistant/${TEMPLATE_ASSISTANT_ID}`,
-    { headers: vapiHeaders(), timeout: 15000 }
-  );
+  let template;
+  try {
+    const res = await axios.get(
+      `${VAPI_BASE}/assistant/${TEMPLATE_ASSISTANT_ID}`,
+      { headers: vapiHeaders(), timeout: 15000 }
+    );
+    template = res.data;
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
 
   // 2. Pull the system prompt out of the model messages
   const messages = (template.model && template.model.messages) || [];
@@ -39,14 +62,11 @@ async function createVapiAssistant(business) {
     : ['en'];
 
   systemPrompt = systemPrompt
-    // Business name (literal and template variable)
     .replace(/Sam's Barbershop/g, business.name)
     .replace(/\{\{businessName\}\}/g, business.name)
-    // Timezone
     .replace(/America\/Toronto/g, tz)
     .replace(/Toronto, Canada/g, business.address || 'Toronto, Canada');
 
-  // Language — strip Korean if not supported
   if (!langs.includes('ko')) {
     systemPrompt = systemPrompt
       .replace(/\{\{supportedLanguages\}\}/g, 'en')
@@ -54,21 +74,18 @@ async function createVapiAssistant(business) {
       .replace(/English or Korean/g, 'English')
       .replace(/English and Korean/g, 'English')
       .replace(/speak in English or Korean/g, 'speak in English')
-      // Remove the bilingual greeting example line
       .replace(/- Example for en\+ko:.*\n/g, '')
-      // Remove the Korean-only greeting instruction block
       .replace(/- If the business supports multiple languages.*\n/g, '');
   } else {
     systemPrompt = systemPrompt
       .replace(/\{\{supportedLanguages\}\}/g, 'en, ko');
   }
 
-  // 4. Build the new assistant config — strip server-assigned fields
+  // 4. Build the new assistant config — strip all server-assigned / read-only fields
   const newConfig = { ...template };
-  delete newConfig.id;
-  delete newConfig.createdAt;
-  delete newConfig.updatedAt;
-  delete newConfig.orgId;
+  for (const field of SERVER_ASSIGNED_FIELDS) {
+    delete newConfig[field];
+  }
 
   newConfig.name = `${business.name} — AI Receptionist`;
 
@@ -81,11 +98,17 @@ async function createVapiAssistant(business) {
   }
 
   // 5. Create the assistant
-  const { data: created } = await axios.post(
-    `${VAPI_BASE}/assistant`,
-    newConfig,
-    { headers: vapiHeaders(), timeout: 15000 }
-  );
+  let created;
+  try {
+    const res = await axios.post(
+      `${VAPI_BASE}/assistant`,
+      newConfig,
+      { headers: vapiHeaders(), timeout: 15000 }
+    );
+    created = res.data;
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
 
   console.log(`Vapi assistant created for ${business.name}: ${created.id}`);
   return created.id;
@@ -94,17 +117,21 @@ async function createVapiAssistant(business) {
 // ── updateVapiAssistant ───────────────────────────────────────────────────────
 // Refreshes the services and barbers sections of an existing assistant's prompt.
 async function updateVapiAssistant(assistantId, business, services, barbers) {
-  // 1. Fetch current config
-  const { data: current } = await axios.get(
-    `${VAPI_BASE}/assistant/${assistantId}`,
-    { headers: vapiHeaders(), timeout: 15000 }
-  );
+  let current;
+  try {
+    const res = await axios.get(
+      `${VAPI_BASE}/assistant/${assistantId}`,
+      { headers: vapiHeaders(), timeout: 15000 }
+    );
+    current = res.data;
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
 
   const messages = (current.model && current.model.messages) || [];
   const sysMsgIndex = messages.findIndex(m => m.role === 'system');
   let systemPrompt = sysMsgIndex >= 0 ? messages[sysMsgIndex].content : '';
 
-  // 2. Rebuild services block
   if (services && services.length > 0) {
     const serviceLines = services
       .filter(s => s.name)
@@ -116,7 +143,6 @@ async function updateVapiAssistant(assistantId, business, services, barbers) {
         return line;
       })
       .join('\n');
-
     const servicesBlock = `SERVICES:\n${serviceLines}`;
     if (systemPrompt.includes('SERVICES:')) {
       systemPrompt = systemPrompt.replace(/SERVICES:[\s\S]*?(?=\n[A-Z]{2,}:|$)/, servicesBlock + '\n');
@@ -125,7 +151,6 @@ async function updateVapiAssistant(assistantId, business, services, barbers) {
     }
   }
 
-  // 3. Rebuild barbers/team block
   if (barbers && barbers.length > 0) {
     const barberLines = barbers.map(b => `- ${b}`).join('\n');
     const teamBlock = `TEAM:\n${barberLines}`;
@@ -136,17 +161,20 @@ async function updateVapiAssistant(assistantId, business, services, barbers) {
     }
   }
 
-  // 4. PATCH assistant
   const updatedMessages = [...messages];
   if (sysMsgIndex >= 0) {
     updatedMessages[sysMsgIndex] = { ...messages[sysMsgIndex], content: systemPrompt };
   }
 
-  await axios.patch(
-    `${VAPI_BASE}/assistant/${assistantId}`,
-    { model: { ...current.model, messages: updatedMessages } },
-    { headers: vapiHeaders(), timeout: 15000 }
-  );
+  try {
+    await axios.patch(
+      `${VAPI_BASE}/assistant/${assistantId}`,
+      { model: { ...current.model, messages: updatedMessages } },
+      { headers: vapiHeaders(), timeout: 15000 }
+    );
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
 
   console.log(`Vapi assistant updated for ${business.name}`);
   return true;
@@ -155,10 +183,14 @@ async function updateVapiAssistant(assistantId, business, services, barbers) {
 // ── deleteVapiAssistant ───────────────────────────────────────────────────────
 // Deletes a Vapi assistant — used for cleanup if provisioning fails.
 async function deleteVapiAssistant(assistantId) {
-  await axios.delete(
-    `${VAPI_BASE}/assistant/${assistantId}`,
-    { headers: vapiHeaders(), timeout: 15000 }
-  );
+  try {
+    await axios.delete(
+      `${VAPI_BASE}/assistant/${assistantId}`,
+      { headers: vapiHeaders(), timeout: 15000 }
+    );
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
   console.log(`Vapi assistant deleted: ${assistantId}`);
 }
 
