@@ -4,9 +4,20 @@
  *
  * Required env vars:
  *   VAPI_API_KEY — Vapi API key (Bearer token)
+ *
+ * System prompt source of truth: vapi-system-prompt.txt (version-controlled).
+ * The template assistant on Vapi is cloned for its non-prompt config only.
  */
 
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+
+// Load the canonical system prompt template from disk (version-controlled source of truth)
+const PROMPT_TEMPLATE_PATH = path.join(__dirname, '..', 'vapi-system-prompt.txt');
+function loadSystemPromptTemplate() {
+  return fs.readFileSync(PROMPT_TEMPLATE_PATH, 'utf8');
+}
 
 const VAPI_BASE = 'https://api.vapi.ai';
 const TEMPLATE_ASSISTANT_ID = '3f7183f9-4796-4104-8b08-015a4d675792';
@@ -51,10 +62,11 @@ async function createVapiAssistant(business) {
     throw new Error(vapiError(err));
   }
 
-  // 2. Pull the system prompt out of the model messages
+  // 2. Load system prompt from local file (source of truth) — not from template's stored prompt
+  //    This prevents template corruption from affecting new businesses.
   const messages = (template.model && template.model.messages) || [];
   const sysMsgIndex = messages.findIndex(m => m.role === 'system');
-  let systemPrompt = sysMsgIndex >= 0 ? messages[sysMsgIndex].content : '';
+  let systemPrompt = loadSystemPromptTemplate();
 
   // 3. Replace business-specific values in the prompt
   const tz = business.timezone || 'America/Toronto';

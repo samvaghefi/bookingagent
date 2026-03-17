@@ -1130,6 +1130,55 @@ app.get('/health', (req, res) => {
 });
 
 
+
+// ── POST /admin/patch-vapi-template ────────────────────────────────────────────
+// Rewrites the Vapi template assistant's system prompt from vapi-system-prompt.txt.
+// Run once to fix a corrupted template. Requires x-admin-key header.
+app.post('/admin/patch-vapi-template', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const axios = require('axios');
+    const fs = require('fs');
+    const path = require('path');
+    const TEMPLATE_ID = '3f7183f9-4796-4104-8b08-015a4d675792';
+
+    // 1. Fetch current template
+    const { data: current } = await axios.get(
+      `https://api.vapi.ai/assistant/${TEMPLATE_ID}`,
+      { headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}` }, timeout: 15000 }
+    );
+
+    // 2. Load canonical prompt from disk
+    const canonicalPrompt = fs.readFileSync(
+      path.join(__dirname, '..', 'vapi-system-prompt.txt'), 'utf8'
+    );
+
+    // 3. Replace system message with canonical version
+    const messages = (current.model && current.model.messages) || [];
+    const sysMsgIndex = messages.findIndex(m => m.role === 'system');
+    const updatedMessages = [...messages];
+    if (sysMsgIndex >= 0) {
+      updatedMessages[sysMsgIndex] = { ...messages[sysMsgIndex], content: canonicalPrompt };
+    } else {
+      updatedMessages.unshift({ role: 'system', content: canonicalPrompt });
+    }
+
+    // 4. Patch the template
+    await axios.patch(
+      `https://api.vapi.ai/assistant/${TEMPLATE_ID}`,
+      { model: { ...current.model, messages: updatedMessages } },
+      { headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+
+    return res.json({ ok: true, message: 'Template system prompt updated from vapi-system-prompt.txt' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /admin/vapi-template ──────────────────────────────────────────────
 // Returns the current system prompt of the Vapi template assistant.
 // Requires header: x-admin-key matching ADMIN_SECRET env var.
