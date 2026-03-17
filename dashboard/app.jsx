@@ -1006,6 +1006,15 @@ function OnboardingPage({ setPage }) {
   };
 
   const complete = async () => {
+    console.log('[complete] called with:', {
+      name: data.name,
+      phone: data.phone,
+      address: data.address,
+      ai_name: data.ai_name,
+      business_type: data.business_type,
+      timezone: data.timezone,
+      barbers: data.barbers,
+    });
     setSaving(true);
     try {
       await apiFetch('/api/business', {
@@ -1027,7 +1036,9 @@ function OnboardingPage({ setPage }) {
         body: JSON.stringify({ services: data.services }),
       });
       setPage('home');
-    } catch {}
+    } catch(err) {
+      console.error('[complete] failed:', err);
+    }
     setSaving(false);
   };
 
