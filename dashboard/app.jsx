@@ -39,6 +39,7 @@ function Sidebar({ page, setPage, business }) {
     { id: 'bookings',  label: 'Bookings',  icon: '📅' },
     { id: 'settings',  label: 'Settings',  icon: '⚙' },
     { id: 'billing',   label: 'Billing',   icon: '💳' },
+    { id: 'onboarding', label: 'Setup Wizard', icon: '✨' },
   ];
 
   return (
