@@ -295,7 +295,7 @@ function BookingsPage() {
 // ── Settings Page ─────────────────────────────────────────────────────────────
 const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
 
-function SettingsPage() {
+function SettingsPage({ setPage }) {
   const [business, setBusiness]   = useState(null);
   const [services, setServices]   = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -1351,7 +1351,7 @@ function App() {
         <div className="content-area">
           {page === 'home'       && <DashboardHome />}
           {page === 'bookings'   && <BookingsPage />}
-          {page === 'settings'   && <SettingsPage />}
+          {page === 'settings'   && <SettingsPage setPage={setPage} />}
           {page === 'billing'    && <BillingPage />}
           {page === 'onboarding' && <OnboardingPage setPage={setPage} />}
         </div>
