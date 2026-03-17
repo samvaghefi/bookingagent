@@ -159,7 +159,7 @@ function BookingsTable({ bookings }) {
             <th>Service</th>
             <th>Date</th>
             <th>Time</th>
-            <th>Barber</th>
+            <th>Team Member</th>
             <th>Special Requests</th>
             <th>Status</th>
           </tr>
@@ -557,11 +557,11 @@ function SettingsPage() {
         )}
       </div>
 
-      {/* ── Barbers / Team ── */}
-      {business?.plan !== 'solo' && <div className="card">
-        <div className="card-header">Your Team</div>
+      {/* ── Team Members ── */}
+      {business?.plan !== 'solo' ? <div className="card">
+        <div className="card-header">Team Members</div>
         <p className="card-note">
-          These names are used by your AI receptionist when customers request a specific barber.
+          These names are used by your AI receptionist when customers request a specific team member.
         </p>
         <div className="barbers-list">
           {barbers.map((name, i) => (
@@ -581,7 +581,7 @@ function SettingsPage() {
         </div>
         <div className="add-barber-row">
           <input
-            placeholder="Barber name"
+            placeholder="Name"
             value={newBarber}
             onChange={e => setNewBarber(e.target.value)}
             onKeyDown={e => {
@@ -605,9 +605,12 @@ function SettingsPage() {
         </div>
         <div className="save-row">
           <button className="btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Team'}
+            {saving ? 'Saving...' : 'Save Team Members'}
           </button>
         </div>
+      </div> : <div className="card">
+        <div className="card-header">Team Members</div>
+        <p className="card-note" style={{color:'#9ca3af'}}>Team members are available on Starter and Pro plans. <a href="#" onClick={e=>{e.preventDefault();setPage('billing')}} style={{color:'#534ab7'}}>Upgrade your plan →</a></p>
       </div>}
 
       {/* ── AI Agent Settings ── */}
@@ -709,8 +712,8 @@ function BillingPage() {
   };
 
   const UPGRADE_INFO = {
-    solo:    { to: 'starter', label: 'Starter', price: '$99/mo', desc: 'Unlock walk-in waitlist, no-show deposits, and full analytics for up to 4 barbers.' },
-    starter: { to: 'pro',     label: 'Pro',     price: '$199/mo', desc: 'Unlimited barbers, priority support, and advanced analytics.' },
+    solo:    { to: 'starter', label: 'Starter', price: '$99/mo', desc: 'Unlock full analytics and add up to 4 team members.' },
+    starter: { to: 'pro',     label: 'Pro',     price: '$199/mo', desc: 'Unlimited team members, priority support, and advanced analytics.' },
     pro:     null,
   };
 
@@ -908,9 +911,9 @@ const SERVICE_DEFAULTS = {
 };
 
 const TEAM_LABEL = {
-  'Barbershop': 'Who are your barbers?',
-  'Hair Salon':  'Who are your stylists?',
-  'Nail Salon':  'Who are your nail technicians?',
+  'Barbershop': 'Who are your team members?',
+  'Hair Salon':  'Who are your team members?',
+  'Nail Salon':  'Who are your team members?',
 };
 
 function OnboardingPage({ setPage }) {
@@ -1190,9 +1193,9 @@ function OnboardingPage({ setPage }) {
         {/* Step 3 — team (solo skips this, goes to step 3 = final/forwarding) */}
         {step === 3 && plan !== 'solo' && (
           <div className="step-content">
-            <h2>{TEAM_LABEL[data.business_type] || 'Who is your team?'}</h2>
+            <h2>{TEAM_LABEL[data.business_type] || 'Who are your team members?'}</h2>
             <p className="step-sub">
-              Customers can request a specific team member when they call.
+              Customers can request a specific team member by name when they call.
               {plan === 'starter' && <span style={{ display: 'block', fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Starter plan includes up to 4 team members.</span>}
             </p>
             <div className="barbers-list" style={{ marginBottom: 16 }}>

@@ -168,9 +168,12 @@ async function updateVapiAssistant(assistantId, business, services, barbers) {
 
   if (barbers && barbers.length > 0) {
     const barberLines = barbers.map(b => `- ${b}`).join('\n');
-    const teamBlock = `TEAM:\n${barberLines}`;
-    if (systemPrompt.includes('TEAM:')) {
-      systemPrompt = systemPrompt.replace(/TEAM:[\s\S]*?(?=\n[A-Z]{2,}:|$)/, teamBlock + '\n');
+    const teamBlock = `TEAM MEMBERS:\n${barberLines}`;
+    // Support both old 'TEAM:' header and new 'TEAM MEMBERS:'
+    if (systemPrompt.includes('TEAM MEMBERS:') || systemPrompt.includes('TEAM:')) {
+      systemPrompt = systemPrompt
+        .replace(/TEAM MEMBERS:[\s\S]*?(?=\n[A-Z]{2,}:|$)/, teamBlock + '\n')
+        .replace(/TEAM:[\s\S]*?(?=\n[A-Z]{2,}:|$)/, teamBlock + '\n');
     } else {
       systemPrompt += `\n\n${teamBlock}`;
     }

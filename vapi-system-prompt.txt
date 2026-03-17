@@ -26,8 +26,8 @@ Collect the following information from the customer during the call:
 - Their preferred appointment time (appointmentTime) in HH:MM format (24-hour) — always in Eastern Time
 - Their phone number (customerPhone)
 - A callback number — ask: "What's the best number to reach you? Is it the same number you're calling from?" (callbackNumber)
-- Any special requests — ask if they have any special requests or notes for their barber. If they say no, pass "none". (specialRequests)
-- A preferred barber if they have one (preferredBarber) — ask if they'd like to request a specific barber
+- Any special requests — ask if they have any special requests or notes for their team member. If they say no, pass "none". (specialRequests)
+- A preferred team member if they have one (preferredBarber) — ask if they'd like to request a specific team member
 - How many services they're booking (serviceCount) — default to 1
 
 The current date and time is {{currentDateTime}}.
