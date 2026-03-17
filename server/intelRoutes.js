@@ -117,14 +117,65 @@ router.get('/intel/report/:id', requireIntelAuth, async (req, res) => {
 
 // ── GET /intel ────────────────────────────────────────────────────────────────
 router.get('/intel', requireIntelAuth, async (req, res) => {
-  const { data: reports, error } = await supabase
+  const sort    = req.query.sort === 'asc' ? 'asc' : 'desc';
+  const fromDate = req.query.from || '';
+  const toDate   = req.query.to   || '';
+  const deleted  = parseInt(req.query.deleted, 10) || 0;
+
+  // Build query
+  let query = supabase
     .from('competitor_report_log')
     .select('id, run_date, changes_detected, urgent_flag, email_sent')
-    .order('run_date', { ascending: false });
+    .order('run_date', { ascending: sort === 'asc' });
+
+  if (fromDate) query = query.gte('run_date', fromDate);
+  if (toDate)   query = query.lte('run_date', toDate);
+
+  const { data: reports, error } = await query;
 
   if (error) {
     return res.status(500).send(`<p>Database error: ${error.message}</p>`);
   }
+
+  // Helper: build URL preserving current params but overriding some
+  function buildUrl(overrides) {
+    const params = new URLSearchParams();
+    const merged = { sort, from: fromDate, to: toDate, ...overrides };
+    if (merged.sort && merged.sort !== 'desc') params.set('sort', merged.sort);
+    if (merged.from) params.set('from', merged.from);
+    if (merged.to)   params.set('to',   merged.to);
+    const qs = params.toString();
+    return '/intel' + (qs ? '?' + qs : '');
+  }
+
+  // Sort toggle URL: flips sort, keeps filter
+  const toggleSort  = sort === 'desc' ? 'asc' : 'desc';
+  const sortArrow   = sort === 'desc' ? '↓' : '↑';
+  const sortLabel   = sort === 'desc' ? 'Newest first' : 'Oldest first';
+  const sortToggleUrl = buildUrl({ sort: toggleSort });
+
+  // Clear filter URL: keeps sort, clears dates
+  const clearFilterUrl = buildUrl({ from: '', to: '' });
+
+  // Delete form action — preserve sort+filter in redirect
+  const deleteRedirectBase = buildUrl({});
+
+  // Banners
+  const deleteBanner = deleted > 0
+    ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:#15803d;font-weight:500;">
+        ✓ ${deleted} report${deleted !== 1 ? 's' : ''} successfully deleted.
+       </div>`
+    : '';
+
+  const filterBanner = (fromDate || toDate)
+    ? `<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:#1d4ed8;">
+        Showing reports${fromDate ? ` from <strong>${fromDate}</strong>` : ''}${toDate ? ` to <strong>${toDate}</strong>` : ''}.
+        <a href="${clearFilterUrl}" style="margin-left:12px;color:#2563eb;font-weight:600;">Clear filter</a>
+       </div>`
+    : '';
+
+  // Table rows
+  const INPUT_STYLE = 'padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;color:#111827;background:#fff;';
 
   const rows = (reports || []).map(r => {
     const date = new Date(r.run_date + 'T00:00:00');
@@ -139,25 +190,24 @@ router.get('/intel', requireIntelAuth, async (req, res) => {
 
     const urgentCell = r.urgent_flag
       ? `<div><span style="background:#fee2e2;color:#dc2626;border:1px solid #fca5a5;border-radius:999px;font-size:11px;font-weight:700;padding:2px 10px;display:inline-block;margin-bottom:4px;">URGENT</span>
-         <div style="font-size:12px;color:#374151;margin-top:3px;">${String(r.urgent_flag).slice(0, 60)}${r.urgent_flag.length > 60 ? '…' : ''}</div></div>`
+         <div style="font-size:12px;color:#374151;margin-top:3px;">${String(r.urgent_flag).slice(0, 60)}${String(r.urgent_flag).length > 60 ? '…' : ''}</div></div>`
       : `<span style="color:#9ca3af;">—</span>`;
 
-    const rowBorder = r.urgent_flag
-      ? 'border-left:3px solid #ef4444;'
-      : 'border-left:3px solid transparent;';
+    const rowBorder = r.urgent_flag ? 'border-left:3px solid #ef4444;' : 'border-left:3px solid transparent;';
 
-    return `<tr style="${rowBorder}background:#fff;">
-      <td style="padding:14px 16px;font-size:14px;font-weight:600;color:#111827;white-space:nowrap;">${formattedDate}</td>
-      <td style="padding:14px 16px;text-align:center;">${changesBadge}</td>
-      <td style="padding:14px 16px;">${urgentCell}</td>
-      <td style="padding:14px 16px;">
-        <a href="/intel/report/${r.id}" style="background:#0f172a;color:#fff;font-size:12px;font-weight:600;padding:6px 14px;border-radius:6px;display:inline-block;white-space:nowrap;">View Report</a>
+    return `<tr style="${rowBorder}background:#fff;" data-id="${r.id}">
+      <td style="padding:12px 10px 12px 14px;width:32px;"><input type="checkbox" name="ids" value="${r.id}" class="row-cb" style="width:15px;height:15px;cursor:pointer;accent-color:#0f172a;" onchange="updateDeleteBtn()"></td>
+      <td style="padding:12px 16px;font-size:14px;font-weight:600;color:#111827;white-space:nowrap;">${formattedDate}</td>
+      <td style="padding:12px 16px;text-align:center;">${changesBadge}</td>
+      <td style="padding:12px 16px;">${urgentCell}</td>
+      <td style="padding:12px 16px;white-space:nowrap;">
+        <a href="/intel/report/${r.id}" style="background:#0f172a;color:#fff;font-size:12px;font-weight:600;padding:6px 14px;border-radius:6px;display:inline-block;">View Report</a>
       </td>
     </tr>`;
   }).join('');
 
   const emptyState = (reports || []).length === 0
-    ? `<tr><td colspan="4" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px;">No reports yet. Run the intel monitor to generate the first report.</td></tr>`
+    ? `<tr><td colspan="5" style="padding:40px;text-align:center;color:#9ca3af;font-size:14px;">No reports found.</td></tr>`
     : '';
 
   res.send(`<!DOCTYPE html>
@@ -166,24 +216,64 @@ router.get('/intel', requireIntelAuth, async (req, res) => {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Intel Reports — bimblyai</title>
-  <style>${BASE_STYLES}
+  <style>
+    ${BASE_STYLES}
     table { width: 100%; border-collapse: collapse; }
     th { background: #f9fafb; text-align: left; padding: 10px 16px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid #e5e7eb; }
     tr + tr td { border-top: 1px solid #f3f4f6; }
+    input[type="date"] { ${INPUT_STYLE} }
   </style>
 </head>
 <body>
   ${HEADER_HTML}
-  <div style="max-width:1000px;margin:0 auto;padding:40px 24px;">
-    <div style="margin-bottom:32px;">
-      <h1 style="font-size:24px;font-weight:700;color:#111827;margin:0 0 8px;">Competitive Intelligence Archive</h1>
+  <div style="max-width:1100px;margin:0 auto;padding:40px 24px;">
+
+    <div style="margin-bottom:24px;">
+      <h1 style="font-size:24px;font-weight:700;color:#111827;margin:0 0 6px;">Competitive Intelligence Archive</h1>
       <p style="color:#6b7280;font-size:14px;margin:0;">Daily reports on competitor activity. Click any report to read it in full.</p>
     </div>
+
+    ${deleteBanner}
+    ${filterBanner}
+
+    <!-- Filter bar -->
+    <form method="GET" action="/intel" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;">
+      <input type="hidden" name="sort" value="${sort}">
+      <label style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;">From</label>
+      <input type="date" name="from" value="${fromDate}" style="${INPUT_STYLE}">
+      <label style="font-size:13px;font-weight:600;color:#374151;white-space:nowrap;">To</label>
+      <input type="date" name="to" value="${toDate}" style="${INPUT_STYLE}">
+      <button type="submit" style="background:#0f172a;color:#fff;font-size:13px;font-weight:600;padding:8px 18px;border:none;border-radius:6px;cursor:pointer;">Filter</button>
+      <a href="${clearFilterUrl}" style="font-size:13px;color:#6b7280;text-decoration:none;margin-left:4px;">Clear</a>
+    </form>
+
+    <!-- Toolbar: delete button (hidden until checkbox checked) -->
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px;min-height:34px;">
+      <form id="delete-form" method="POST" action="/intel/delete">
+        <input type="hidden" name="_redirectBase" value="${deleteRedirectBase}">
+        <div id="delete-btn-wrap" style="display:none;">
+          <button type="submit" onclick="return confirm('Delete selected reports? This cannot be undone.')"
+            style="background:#dc2626;color:#fff;font-size:13px;font-weight:600;padding:7px 16px;border:none;border-radius:6px;cursor:pointer;">
+            Delete Selected
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Table (inside the same delete form via JS — checkboxes submit with the form above) -->
     <div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
-      <table>
+      <table id="reports-table">
         <thead>
           <tr>
-            <th>Date</th>
+            <th style="width:40px;padding:10px 10px 10px 14px;">
+              <input type="checkbox" id="select-all" style="width:15px;height:15px;cursor:pointer;accent-color:#0f172a;" onchange="toggleAll(this)">
+            </th>
+            <th>
+              <a href="${sortToggleUrl}" style="color:#6b7280;text-decoration:none;display:flex;align-items:center;gap:5px;">
+                Date <span style="font-size:13px;">${sortArrow}</span>
+                <span style="font-size:10px;font-weight:400;color:#9ca3af;">(${sortLabel})</span>
+              </a>
+            </th>
             <th style="text-align:center;">Changes</th>
             <th>Urgent Flag</th>
             <th>Actions</th>
@@ -196,8 +286,65 @@ router.get('/intel', requireIntelAuth, async (req, res) => {
       </table>
     </div>
   </div>
+
+  <script>
+    // Move checkbox inputs into the delete form on submit so they are included
+    var deleteForm = document.getElementById('delete-form');
+    var table = document.getElementById('reports-table');
+
+    function updateDeleteBtn() {
+      var checked = table.querySelectorAll('.row-cb:checked');
+      document.getElementById('delete-btn-wrap').style.display = checked.length > 0 ? 'block' : 'none';
+      // Sync select-all state
+      var all = table.querySelectorAll('.row-cb');
+      document.getElementById('select-all').indeterminate = checked.length > 0 && checked.length < all.length;
+      document.getElementById('select-all').checked = all.length > 0 && checked.length === all.length;
+    }
+
+    function toggleAll(cb) {
+      table.querySelectorAll('.row-cb').forEach(function(c) { c.checked = cb.checked; });
+      updateDeleteBtn();
+    }
+
+    // On delete form submit, inject checked IDs as hidden inputs
+    deleteForm.addEventListener('submit', function(e) {
+      // Remove any previously injected id inputs
+      deleteForm.querySelectorAll('input[name="ids"]').forEach(function(el) { el.remove(); });
+      table.querySelectorAll('.row-cb:checked').forEach(function(cb) {
+        var inp = document.createElement('input');
+        inp.type = 'hidden';
+        inp.name = 'ids';
+        inp.value = cb.value;
+        deleteForm.appendChild(inp);
+      });
+    });
+  </script>
 </body>
 </html>`);
+});
+
+// ── POST /intel/delete ────────────────────────────────────────────────────────
+router.post('/intel/delete', requireIntelAuth, async (req, res) => {
+  let ids = req.body.ids || [];
+  if (!Array.isArray(ids)) ids = [ids];
+  ids = ids.filter(Boolean);
+
+  if (ids.length === 0) return res.redirect('/intel');
+
+  const { error } = await supabase
+    .from('competitor_report_log')
+    .delete()
+    .in('id', ids);
+
+  if (error) {
+    console.error('[intel/delete] Supabase error:', error.message);
+    return res.status(500).send(`<p>Delete failed: ${error.message}</p>`);
+  }
+
+  // Redirect back preserving sort/filter, adding deleted count
+  const redirectBase = req.body._redirectBase || '/intel';
+  const sep = redirectBase.includes('?') ? '&' : '?';
+  res.redirect(`${redirectBase}${sep}deleted=${ids.length}`);
 });
 
 // ── Login page renderer ───────────────────────────────────────────────────────
