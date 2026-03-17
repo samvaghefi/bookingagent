@@ -49,8 +49,17 @@ router.get('/intel/login', (req, res) => {
 });
 
 // ── POST /intel/login ─────────────────────────────────────────────────────────
-router.post('/intel/login', express.urlencoded({ extended: false }), (req, res) => {
-  const { username, password } = req.body;
+router.post('/intel/login', (req, res) => {
+  const { username, password } = req.body || {};
+  console.log('DEBUG LOGIN:', {
+    envUser: (process.env.INTEL_USERNAME || '').substring(0, 3),
+    envPass: (process.env.INTEL_PASSWORD || '').substring(0, 3),
+    submittedUser: (username || '').substring(0, 3),
+    submittedPass: (password || '').substring(0, 3),
+    bodyKeys: Object.keys(req.body || {}),
+    contentType: req.headers['content-type'],
+    match: username === process.env.INTEL_USERNAME && password === process.env.INTEL_PASSWORD,
+  });
   if (
     username === process.env.INTEL_USERNAME &&
     password === process.env.INTEL_PASSWORD

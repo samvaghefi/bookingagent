@@ -139,6 +139,7 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 });
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(session({
   secret: process.env.INTEL_SESSION_SECRET || 'changeme-set-INTEL_SESSION_SECRET',
