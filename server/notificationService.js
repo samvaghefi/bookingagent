@@ -123,8 +123,7 @@ async function sendWelcomeEmail(business) {
         <div style="font-size:11px;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Your AI Receptionist Number</div>
         <div style="font-size:28px;font-weight:700;color:#111827;letter-spacing:0.02em;margin-bottom:10px;">${phone}</div>
         <div style="font-size:13px;color:#374151;line-height:1.5;">
-          Forward your existing business number to this number to activate your AI receptionist.
-          Every unanswered call will be handled by your AI — 24/7.
+          This is your AI receptionist number. Log into your dashboard to complete setup and go live.
         </div>
       </div>
 
@@ -139,10 +138,9 @@ async function sendWelcomeEmail(business) {
       <div style="margin-bottom:24px;">
         <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:10px;">Next steps</div>
         <div style="font-size:13px;color:#374151;line-height:1.8;">
-          1. Log into your <a href="${dashUrl}" style="color:#2563eb;text-decoration:none;font-weight:600;">dashboard</a> to review your setup<br>
-          2. Confirm your services, hours, and team in Settings<br>
-          3. Forward your business number to ${phone}<br>
-          4. Test it — call your number and book a test appointment
+          1. Log into your <a href="${dashUrl}" style="color:#2563eb;text-decoration:none;font-weight:600;">dashboard</a> to complete your setup<br>
+          2. The setup wizard will walk you through your services, hours, and team<br>
+          3. Once setup is complete your AI receptionist will be ready to take calls
         </div>
       </div>
 
@@ -173,7 +171,7 @@ async function sendWelcomeEmail(business) {
       from: FROM,
       subject: 'Welcome to bimblyai — your AI receptionist is ready',
       html,
-      text: `Hi ${ownerName},\n\nYour AI receptionist number is: ${phone}\n\nForward your existing business number to this number to go live.\n\nDashboard: ${dashUrl}\n\nQuestions? hello@bimblyai.com`,
+      text: `Hi ${ownerName},\n\nYour AI receptionist number is: ${phone}\n\nLog into your dashboard to complete setup and go live: ${dashUrl}\n\nQuestions? hello@bimblyai.com`,
     });
     console.log(`📧 Welcome email sent to ${business.email}`);
     return true;
