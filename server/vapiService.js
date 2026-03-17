@@ -89,8 +89,8 @@ async function createVapiAssistant(business) {
   }
 
   // Vapi enforces a 40-character limit on assistant names
-  const rawName = `${business.name} — AI Receptionist`;
-  newConfig.name = rawName.length <= 40 ? rawName : `${business.name.slice(0, 21)}… — AI Receptionist`;
+  const assistantName = `${business.name} Receptionist`.substring(0, 40);
+  newConfig.name = assistantName;
 
   if (newConfig.model) {
     const updatedMessages = [...messages];
