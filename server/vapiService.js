@@ -17,6 +17,7 @@ const SERVER_ASSIGNED_FIELDS = [
   'id', 'createdAt', 'updatedAt', 'orgId',
   'phoneNumbers', 'phoneNumberId', 'squadId',
   'isPublished', 'publishedAt', 'subscribedPlan',
+  'isServerUrlSecretSet',
 ];
 
 function vapiHeaders() {
@@ -87,7 +88,9 @@ async function createVapiAssistant(business) {
     delete newConfig[field];
   }
 
-  newConfig.name = `${business.name} — AI Receptionist`;
+  // Vapi enforces a 40-character limit on assistant names
+  const rawName = `${business.name} — AI Receptionist`;
+  newConfig.name = rawName.length <= 40 ? rawName : `${business.name.slice(0, 21)}… — AI Receptionist`;
 
   if (newConfig.model) {
     const updatedMessages = [...messages];
