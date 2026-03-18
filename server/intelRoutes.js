@@ -338,7 +338,7 @@ router.get('/intel', requireIntelAuth, async (req, res) => {
       var timestamp = document.getElementById('gen-report-timestamp');
 
       btn.disabled = true;
-      btn.textContent = 'Generating… check your email in 3-5 min';
+      btn.textContent = 'Generating report — check your email in ~20 minutes';
       btn.style.opacity = '0.6';
       btn.style.cursor = 'default';
       banner.style.display = 'block';

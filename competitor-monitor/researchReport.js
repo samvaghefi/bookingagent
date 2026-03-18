@@ -338,6 +338,13 @@ async function generateResearchReport() {
   console.log('========================================\n');
 
   // Step 1 — Research each competitor
+  const estimatedMinutes = Math.ceil((competitors.length * 60) / 60) + 5;
+  const estimatedDone = new Date(Date.now() + estimatedMinutes * 60 * 1000);
+  console.log(`⏱ Estimated completion: ${estimatedDone.toLocaleTimeString()} (${estimatedMinutes} min)`);
+
+  console.log('Waiting 10s before first call...');
+  await delay(10000);
+
   const researchResults = [];
   for (let i = 0; i < competitors.length; i++) {
     const competitor = competitors[i];
@@ -351,8 +358,8 @@ async function generateResearchReport() {
     } catch (err) {
       // Retry once on 429
       if (err.response && err.response.status === 429) {
-        console.log(`rate limited — retrying in 10s...`);
-        await delay(10000);
+        console.log(`rate limited — retrying in 2 min...`);
+        await delay(120000);
         try {
           const data = await researchCompetitor(competitor);
           researchResults.push(data);
@@ -366,7 +373,7 @@ async function generateResearchReport() {
         researchResults.push({ name: competitor.name, error: err.message });
       }
     }
-    if (i < competitors.length - 1) await delay(3000);
+    if (i < competitors.length - 1) await delay(60000);
   }
 
   // Step 2 — Strategic analysis
