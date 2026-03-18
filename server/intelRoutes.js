@@ -228,9 +228,21 @@ router.get('/intel', requireIntelAuth, async (req, res) => {
   ${HEADER_HTML}
   <div style="max-width:1100px;margin:0 auto;padding:40px 24px;">
 
-    <div style="margin-bottom:24px;">
-      <h1 style="font-size:24px;font-weight:700;color:#111827;margin:0 0 6px;">Competitive Intelligence Archive</h1>
-      <p style="color:#6b7280;font-size:14px;margin:0;">Daily reports on competitor activity. Click any report to read it in full.</p>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:24px;">
+      <div>
+        <h1 style="font-size:24px;font-weight:700;color:#111827;margin:0 0 6px;">Competitive Intelligence Archive</h1>
+        <p style="color:#6b7280;font-size:14px;margin:0;">Daily reports on competitor activity. Click any report to read it in full.</p>
+      </div>
+      <div style="text-align:right;">
+        <button id="gen-report-btn" onclick="triggerResearchReport()" style="background:#0f172a;color:#fff;font-size:13px;font-weight:600;padding:9px 18px;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">
+          Generate Research Report
+        </button>
+        <div id="gen-report-timestamp" style="font-size:11px;color:#9ca3af;margin-top:5px;display:none;"></div>
+      </div>
+    </div>
+
+    <div id="gen-report-banner" style="display:none;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:10px 16px;margin-bottom:16px;font-size:13px;color:#15803d;font-weight:500;">
+      Research report is being generated. You will receive an email at vaghefi@gmail.com when complete. This takes 3–5 minutes.
     </div>
 
     ${deleteBanner}
@@ -318,9 +330,44 @@ router.get('/intel', requireIntelAuth, async (req, res) => {
         deleteForm.appendChild(inp);
       });
     });
+
+    // Generate Research Report
+    function triggerResearchReport() {
+      var btn = document.getElementById('gen-report-btn');
+      var banner = document.getElementById('gen-report-banner');
+      var timestamp = document.getElementById('gen-report-timestamp');
+
+      btn.disabled = true;
+      btn.textContent = 'Generating… check your email in 3-5 min';
+      btn.style.opacity = '0.6';
+      btn.style.cursor = 'default';
+      banner.style.display = 'block';
+      timestamp.style.display = 'block';
+      timestamp.textContent = 'Last requested: ' + new Date().toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' });
+
+      fetch('/intel/generate-research-report', { method: 'POST' })
+        .catch(function(err) { console.error('generate-research-report fetch error:', err); });
+
+      // Re-enable after 5 minutes
+      setTimeout(function() {
+        btn.disabled = false;
+        btn.textContent = 'Generate Research Report';
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+      }, 300000);
+    }
   </script>
 </body>
 </html>`);
+});
+
+// ── POST /intel/generate-research-report ─────────────────────────────────────
+router.post('/intel/generate-research-report', requireIntelAuth, (req, res) => {
+  const { generateResearchReport } = require('../competitor-monitor/researchReport');
+  generateResearchReport()
+    .then(() => console.log('[intel] Research report generation complete'))
+    .catch(err => console.error('[intel] Research report failed:', err.message));
+  res.json({ status: 'generating' });
 });
 
 // ── POST /intel/delete ────────────────────────────────────────────────────────
