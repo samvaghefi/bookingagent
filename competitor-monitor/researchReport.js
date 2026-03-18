@@ -18,6 +18,8 @@ const bimblyContext = require('./bimbly-context');
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 const FROM_EMAIL = 'hello@bimblyai.com';
 const TO_EMAIL = 'vaghefi@gmail.com';
 const RESEARCH_MODEL = 'claude-sonnet-4-20250514';
@@ -337,17 +339,34 @@ async function generateResearchReport() {
 
   // Step 1 — Research each competitor
   const researchResults = [];
-  for (const competitor of competitors) {
-    process.stdout.write(`Researching ${competitor.name}... `);
+  for (let i = 0; i < competitors.length; i++) {
+    const competitor = competitors[i];
+    const idx = `[${i + 1}/${competitors.length}]`;
+    process.stdout.write(`${idx} Researching ${competitor.name}... `);
+    const t0 = Date.now();
     try {
       const data = await researchCompetitor(competitor);
       researchResults.push(data);
-      console.log('done');
+      console.log(`done (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     } catch (err) {
-      console.log(`FAILED: ${err.message}`);
-      researchResults.push({ name: competitor.name, error: err.message });
+      // Retry once on 429
+      if (err.response && err.response.status === 429) {
+        console.log(`rate limited — retrying in 10s...`);
+        await delay(10000);
+        try {
+          const data = await researchCompetitor(competitor);
+          researchResults.push(data);
+          console.log(`${idx} ${competitor.name} retry done (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+        } catch (retryErr) {
+          console.log(`${idx} ${competitor.name} retry FAILED: ${retryErr.message}`);
+          researchResults.push({ name: competitor.name, error: retryErr.message });
+        }
+      } else {
+        console.log(`FAILED: ${err.message}`);
+        researchResults.push({ name: competitor.name, error: err.message });
+      }
     }
-    await new Promise(r => setTimeout(r, 2000)); // gentle rate limit
+    if (i < competitors.length - 1) await delay(3000);
   }
 
   // Step 2 — Strategic analysis

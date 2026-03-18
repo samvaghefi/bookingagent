@@ -1152,7 +1152,7 @@ app.post('/admin/generate-research-report', async (req, res) => {
 
   return res.json({
     status: 'generating',
-    message: 'Research report is being generated. You will receive an email at vaghefi@gmail.com when complete. This takes 3-5 minutes.',
+    message: 'Research report is being generated. You will receive an email at vaghefi@gmail.com when complete. This takes 5-8 minutes.',
   });
 });
 
