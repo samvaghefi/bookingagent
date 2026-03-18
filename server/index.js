@@ -1131,6 +1131,31 @@ app.get('/health', (req, res) => {
 
 
 
+
+// ── POST /admin/generate-research-report ──────────────────────────────────────
+// Triggers a one-time deep competitor research report (3-5 min, async).
+// Immediately returns 202; report emails to vaghefi@gmail.com when done.
+app.post('/admin/generate-research-report', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden — missing or invalid x-admin-key' });
+  }
+
+  const startTime = Date.now();
+  console.log(`[research-report] Starting at ${new Date().toISOString()}`);
+
+  // Fire and forget — don't await so response returns immediately
+  const { generateResearchReport } = require('../competitor-monitor/researchReport');
+  generateResearchReport()
+    .then(() => console.log(`[research-report] Completed in ${Math.round((Date.now() - startTime) / 1000)}s`))
+    .catch(err => console.error('[research-report] Failed:', err.message));
+
+  return res.json({
+    status: 'generating',
+    message: 'Research report is being generated. You will receive an email at vaghefi@gmail.com when complete. This takes 3-5 minutes.',
+  });
+});
+
 // ── POST /admin/patch-vapi-template ────────────────────────────────────────────
 // Rewrites the Vapi template assistant's system prompt from vapi-system-prompt.txt.
 // Run once to fix a corrupted template. Requires x-admin-key header.
