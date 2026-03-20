@@ -1476,13 +1476,14 @@ function ClientProfilePage({ clients, setClients, setPage }) {
 
   async function handleDelete() {
     try {
-      await apiFetch(`/api/clients/${clientId}`, { method: 'DELETE' });
+      const r = await apiFetch(`/api/clients/${clientId}`, { method: 'DELETE' });
+      if (!r.ok) { const d = await r.json(); setError(d.error || 'Delete failed.'); return; }
       setClients(prev => prev.filter(c => c.id !== clientId));
       setPage('clients');
     } catch { setError('Delete failed.'); }
   }
 
-  if (loading) return <div className="page-content"><Spinner /></div>;
+  if (loading) return <Spinner />;
   if (!client) return null;
 
   return (
