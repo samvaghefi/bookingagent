@@ -1158,6 +1158,46 @@ app.post('/admin/generate-research-report', async (req, res) => {
 
 
 
+
+// ── POST /admin/clone-vapi-for-sams ───────────────────────────────────────────
+// One-shot: creates a proper cloned Vapi assistant for Sam's Barbershop and
+// updates the businesses table with the new assistant ID.
+app.post('/admin/clone-vapi-for-sams', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const { createVapiAssistant } = require('./vapiService');
+    const { createClient } = require('@supabase/supabase-js');
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+    const BUSINESS_ID = 'a09fdd0b-421e-479a-b4d7-120f6a72a043';
+
+    const business = {
+      id: BUSINESS_ID,
+      name: "Sam's Barbershop",
+      address: 'Toronto, Canada',
+      timezone: 'America/Toronto',
+      supported_languages: ['en', 'ko'],
+    };
+
+    const assistantId = await createVapiAssistant(business);
+
+    // Update businesses table
+    const { error } = await supabase
+      .from('businesses')
+      .update({ vapi_assistant_id: assistantId })
+      .eq('id', BUSINESS_ID);
+
+    if (error) throw new Error('Supabase update failed: ' + error.message);
+
+    return res.json({ ok: true, assistantId });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /admin/patch-vapi-voice ───────────────────────────────────────────────
 // One-shot: sets the voiceId on the Vapi template assistant, keeping other voice settings.
 app.post('/admin/patch-vapi-voice', async (req, res) => {
