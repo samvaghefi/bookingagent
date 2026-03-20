@@ -86,7 +86,7 @@ return data;
 
 - [ ] **Step 2: Add the client upsert**
 
-Insert the following block immediately before the `return data;` line inside the main try block (after the booking insert succeeds):
+Insert the following block immediately before the `return data;` line inside the main try block (after the booking insert succeeds). Note: `business` is already a parameter of `saveBooking()`, so both fields are available here. The guard `if (bookingData.customerPhone && bookingData.name)` protects against null phone (possible in the end-of-call-report fallback path):
 
 ```js
   // Upsert client record — fire-and-forget, must never block the booking response
@@ -112,9 +112,9 @@ Insert the following block immediately before the `return data;` line inside the
   }
 ```
 
-- [ ] **Step 3: Verify the retry path also has the upsert**
+- [ ] **Step 3: Verify the retry path is covered**
 
-`saveBooking` has a retry block for when optional columns don't exist. Check if that retry path also has a `return` — if so, copy the client upsert block there too, so clients are upserted even on the retry path. The upsert only needs the core fields (`business_id`, `phone`, `name`) so no column-compat issue applies.
+`saveBooking` has a retry block for when optional columns don't exist. The retry path calls `return retry.data` — insert the same client upsert block (with the null-phone guard) before that `return` as well, so clients are upserted regardless of which path completes the booking.
 
 - [ ] **Step 4: Smoke test — deploy and place a test booking**
 
@@ -578,6 +578,8 @@ TOKEN=<your-jwt> node scripts/test-client-profiles.js http://localhost:3000
 
 Expected: all 8 checks ✅, "8 passed, 0 failed".
 
+**Note:** The QA script uses `+16470000001` as the test phone. If you run the backfill script (Task 5) first, it won't create a record for this number since it's not in real bookings data — so the duplicate-409 test remains accurate.
+
 - [ ] **Step 3: Commit**
 
 ```bash
@@ -624,16 +626,17 @@ In the `titles` object inside `App`, add:
 clients: 'Clients',
 ```
 
-In the JSX return, add the two new page renders alongside the existing ones:
+In the JSX return, add the ClientsPage render (ClientProfilePage will be registered in Task 8 once the component exists):
 ```jsx
-{page === 'clients'        && <ClientsPage clients={clients} setClients={setClients} setPage={setPage} />}
-{page === 'client-profile' && <ClientProfilePage clients={clients} setClients={setClients} setPage={setPage} />}
+{page === 'clients' && <ClientsPage clients={clients} setClients={setClients} setPage={setPage} />}
 ```
 
-Also pass `setPage` down to `BookingsPage`:
+Update the BookingsPage render to accept future props (Task 9 will use them):
 ```jsx
 {page === 'bookings' && <BookingsPage clients={clients} setPage={setPage} />}
 ```
+
+**Note:** `BookingsPage` will not use `clients` or `setPage` until Task 9 wires up the click handler. For now just update the JSX — the component can accept but ignore unknown props.
 
 - [ ] **Step 3: Add "Clients" to the Sidebar**
 
@@ -1036,8 +1039,8 @@ Update the `BookingsTable` render inside `BookingsPage`:
       window._clientProfileId = clientId;
       setPage('client-profile');
     } else {
-      // No client record yet — go to Clients page with phone in search
-      window._clientsSearch = phone;
+      // No client record yet — go to Clients page with phone pre-filled in search
+      window._clientsSearch = phone;  // ClientsPage reads this on mount
       setPage('clients');
     }
   }}
