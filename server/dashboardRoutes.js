@@ -662,7 +662,10 @@ router.put('/api/business/recording', async (req, res) => {
     res.json({ success: true, call_recording_enabled: enabled });
   } catch (err) {
     console.error('PUT /api/business/recording error:', err.message);
-    res.status(500).json({ error:
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── No-Show Deposits ──────────────────────────────────────────────────────────
 router.post('/api/bookings/:id/no-show', async (req, res) => {
   try {
