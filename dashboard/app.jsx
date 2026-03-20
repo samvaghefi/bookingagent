@@ -140,7 +140,25 @@ function BarChart({ data, color }) {
 }
 
 // ── Bookings Table ────────────────────────────────────────────────────────────
-function BookingsTable({ bookings, clients = [], onClientClick }) {
+// ── DepositBadge ─────────────────────────────────────────────────────────────
+function DepositBadge({ status }) {
+  if (!status || status === 'none') return null;
+  const styles = {
+    pending:  { background: '#fef3c7', color: '#92400e', label: 'Deposit Pending' },
+    secured:  { background: '#d1fae5', color: '#065f46', label: 'Secured' },
+    charged:  { background: '#fee2e2', color: '#991b1b', label: 'Charged' },
+    waived:   { background: '#f3f4f6', color: '#6b7280', label: 'Waived' },
+  };
+  const s = styles[status];
+  if (!s) return null;
+  return (
+    <span className="status-badge" style={{ background: s.background, color: s.color, fontWeight: 600, fontSize: 12 }}>
+      {s.label}
+    </span>
+  );
+}
+
+function BookingsTable({ bookings, clients = [], onClientClick, onDepositAction }) {
   if (!bookings.length) {
     return (
       <div className="empty-state">
@@ -163,6 +181,7 @@ function BookingsTable({ bookings, clients = [], onClientClick }) {
             <th>Team Member</th>
             <th>Special Requests</th>
             <th>Status</th>
+            <th>Deposit</th>
           </tr>
         </thead>
         <tbody>
@@ -192,6 +211,33 @@ function BookingsTable({ bookings, clients = [], onClientClick }) {
               <td>{String(b.preferred_barber || '—')}</td>
               <td className="cell-requests">{String(b.special_requests || '—')}</td>
               <td>{String(b.status || '—')}</td>
+              <td>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <DepositBadge status={b.deposit_status} />
+                  {b.deposit_status === 'secured' && onDepositAction && (
+                    <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                      <button
+                        className="btn-outline"
+                        style={{ fontSize: 12, padding: '2px 8px', color: '#dc2626', borderColor: '#dc2626' }}
+                        onClick={() => {
+                          if (confirm(`Charge $${(b.deposit_amount_cents || 0) / 100 || 'deposit'} deposit for no-show?`)) {
+                            onDepositAction(b.id, 'no-show');
+                          }
+                        }}
+                      >
+                        No-Show
+                      </button>
+                      <button
+                        className="btn-outline"
+                        style={{ fontSize: 12, padding: '2px 8px' }}
+                        onClick={() => onDepositAction(b.id, 'waive')}
+                      >
+                        Waive
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -261,6 +307,16 @@ function BookingsPage({ clients = [], setPage }) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('month');
 
+  const handleDepositAction = async (bookingId, action) => {
+    const endpoint = action === 'no-show' ? 'no-show' : 'waive-deposit';
+    try {
+      const res = await apiFetch(`/api/bookings/${bookingId}/${endpoint}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Action failed.'); return; }
+      setBookings(bs => bs.map(b => b.id === bookingId ? data.booking : b));
+    } catch { alert('Action failed. Please try again.'); }
+  };
+
   useEffect(() => {
     setLoading(true);
     let query = '/api/bookings';
@@ -301,6 +357,7 @@ function BookingsPage({ clients = [], setPage }) {
           <BookingsTable
             bookings={bookings}
             clients={clients}
+            onDepositAction={handleDepositAction}
             onClientClick={(clientId, phone) => {
               if (clientId) {
                 window._clientProfileId = clientId;
@@ -331,6 +388,8 @@ function SettingsPage({ setPage }) {
   const [newBarber, setNewBarber]   = useState('');
   const [recordSaving, setRecordSaving] = useState(false);
   const [recordMsg, setRecordMsg]       = useState('');
+  const [depositSaving, setDepositSaving] = useState(false);
+  const [depositMsg, setDepositMsg]       = useState('');
   const recordDebounceRef = useRef(null);
 
   useEffect(() => {
@@ -340,7 +399,7 @@ function SettingsPage({ setPage }) {
     ])
       .then(([b, s]) => {
         const biz = b.business || b;
-        setBusiness(biz);
+        setBusiness({ ...biz, deposit_amount_display: biz.deposit_amount != null ? biz.deposit_amount / 100 : 25 });
         setServices(s.services || s || []);
         setBarbers(biz.barbers || []);
       })
@@ -392,6 +451,27 @@ function SettingsPage({ setPage }) {
         setRecordSaving(false);
       }
     }, 500);
+  };
+
+  const handleDepositSave = async () => {
+    setDepositSaving(true);
+    setDepositMsg('');
+    try {
+      await apiFetch('/api/business', {
+        method: 'PUT',
+        body: JSON.stringify({
+          deposit_enabled: business.deposit_enabled,
+          deposit_amount:  Math.round((business.deposit_amount_display || 0) * 100),
+        }),
+      });
+      setBusiness(b => ({ ...b, deposit_amount: Math.round((b.deposit_amount_display || 0) * 100) }));
+      setDepositMsg('Saved!');
+      setTimeout(() => setDepositMsg(''), 2500);
+    } catch {
+      setDepositMsg('Failed to save.');
+    } finally {
+      setDepositSaving(false);
+    }
   };
 
   const addService = async () => {
@@ -637,6 +717,55 @@ function SettingsPage({ setPage }) {
         <div className="card-header">Team Members</div>
         <p className="card-note" style={{color:'#9ca3af'}}>Team members are available on Starter and Pro plans. <a href="#" onClick={e=>{e.preventDefault();setPage('billing')}} style={{color:'#534ab7'}}>Upgrade your plan →</a></p>
       </div>}
+
+      {/* ── No-Show Deposits ── */}
+      <div className="card">
+        <div className="card-header">No-Show Deposits</div>
+        <div className="settings-grid">
+          <div className="form-group full-width">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+              <input
+                type="checkbox"
+                id="depositToggle"
+                checked={!!business?.deposit_enabled}
+                onChange={e => setBusiness(b => ({ ...b, deposit_enabled: e.target.checked }))}
+                style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#534AB7' }}
+              />
+              <label htmlFor="depositToggle" style={{ margin: 0, fontWeight: 400, fontSize: 14, color: '#374151', cursor: 'pointer' }}>
+                Require a deposit to secure bookings
+              </label>
+            </div>
+          </div>
+          {business?.deposit_enabled && (
+            <>
+              <div className="form-group">
+                <label>Deposit Amount (CA$)</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={business?.deposit_amount_display ?? 25}
+                  onChange={e => setBusiness(b => ({ ...b, deposit_amount_display: parseFloat(e.target.value) || 0 }))}
+                  style={{ width: 120 }}
+                />
+              </div>
+              <div className="form-group full-width">
+                <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#92400e' }}>
+                  Remember to update your Vapi assistant prompt to mention the deposit policy.
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="save-row">
+          <button className="btn-primary" onClick={handleDepositSave} disabled={depositSaving}>
+            {depositSaving ? 'Saving...' : 'Save Deposit Settings'}
+          </button>
+          {depositMsg && (
+            <span className={`save-msg ${depositMsg === 'Saved!' ? 'success' : 'error'}`}>{depositMsg}</span>
+          )}
+        </div>
+      </div>
 
       {/* ── AI Agent Settings ── */}
       <div className="card">
@@ -1461,6 +1590,16 @@ function ClientProfilePage({ clients, setClients, setPage }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [error, setError]       = useState('');
 
+  const handleDepositAction = async (bookingId, action) => {
+    const endpoint = action === 'no-show' ? 'no-show' : 'waive-deposit';
+    try {
+      const res = await apiFetch(`/api/bookings/${bookingId}/${endpoint}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Action failed.'); return; }
+      setBookings(bs => bs.map(b => b.id === bookingId ? data.booking : b));
+    } catch { alert('Action failed. Please try again.'); }
+  };
+
   useEffect(() => {
     if (!clientId) { setPage('clients'); return; }
     apiFetch(`/api/clients/${clientId}`)
@@ -1599,7 +1738,7 @@ function ClientProfilePage({ clients, setClients, setPage }) {
           <div className="table-wrap">
             <table className="data-table">
               <thead>
-                <tr><th>Date</th><th>Time</th><th>Service</th><th>Team Member</th><th>Special Requests</th></tr>
+                <tr><th>Date</th><th>Time</th><th>Service</th><th>Team Member</th><th>Special Requests</th><th>Deposit</th></tr>
               </thead>
               <tbody>
                 {bookings.map(b => (
@@ -1609,6 +1748,33 @@ function ClientProfilePage({ clients, setClients, setPage }) {
                     <td>{Array.isArray(b.service_ids) ? b.service_ids.join(', ') : b.service_ids || '—'}</td>
                     <td>{b.preferred_barber || '—'}</td>
                     <td className="cell-requests">{b.special_requests || '—'}</td>
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <DepositBadge status={b.deposit_status} />
+                        {b.deposit_status === 'secured' && (
+                          <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                            <button
+                              className="btn-outline"
+                              style={{ fontSize: 12, padding: '2px 8px', color: '#dc2626', borderColor: '#dc2626' }}
+                              onClick={() => {
+                                if (confirm('Charge deposit for no-show?')) {
+                                  handleDepositAction(b.id, 'no-show');
+                                }
+                              }}
+                            >
+                              No-Show
+                            </button>
+                            <button
+                              className="btn-outline"
+                              style={{ fontSize: 12, padding: '2px 8px' }}
+                              onClick={() => handleDepositAction(b.id, 'waive')}
+                            >
+                              Waive
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
