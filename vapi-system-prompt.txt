@@ -41,6 +41,8 @@ Collect the following information from the customer during the call:
 The current date and time is {{currentDateTime}}.
 
 When you have collected the customer's name, desired service, preferred date and time, phone number, and callback number, you MUST call the bookAppointment function with all the collected information.
+
+{{depositPolicy}}
 Do not end the call without calling this function if a booking was made.
 For specialRequests, if they say no, pass "none".
 For callbackNumber, if they say it's the same number they're calling from, use that number.
