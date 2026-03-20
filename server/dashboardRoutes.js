@@ -462,23 +462,17 @@ router.get('/api/clients/:id', async (req, res) => {
 
     if (cErr || !client) return res.status(404).json({ error: 'Client not found.' });
 
-    const [{ data: bookings, error: bErr }, { data: allBookings, error: abErr }] = await Promise.all([
-      supabase.from('bookings')
-        .select('*')
-        .eq('business_id', req.business.id)
-        .eq('customer_phone', client.phone)
-        .order('appointment_date', { ascending: false })
-        .order('appointment_time', { ascending: false }),
-      supabase.from('bookings')
-        .select('customer_phone, appointment_date, service_ids, preferred_barber')
-        .eq('business_id', req.business.id)
-        .eq('customer_phone', client.phone)
-    ]);
+    const { data: bookings, error: bErr } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('business_id', req.business.id)
+      .eq('customer_phone', client.phone)
+      .order('appointment_date', { ascending: false })
+      .order('appointment_time', { ascending: false });
 
     if (bErr) throw bErr;
-    if (abErr) throw abErr;
 
-    const stats = computeClientStats(allBookings || []);
+    const stats = computeClientStats(bookings || []);
     const enriched = { ...client, ...(stats[client.phone] || { visit_count: 0, last_visit: null, preferred_service: null, preferred_barber: null }) };
 
     res.json({ client: enriched, bookings: bookings || [] });
@@ -511,7 +505,13 @@ router.put('/api/clients/:id', async (req, res) => {
       .select()
       .single();
 
-    if (error || !client) return res.status(404).json({ error: 'Client not found.' });
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Client not found.' });
+      }
+      throw error;
+    }
+    if (!client) return res.status(404).json({ error: 'Client not found.' });
     res.json({ client });
   } catch (err) {
     console.error('PUT /api/clients/:id error:', err.message);
@@ -530,7 +530,13 @@ router.delete('/api/clients/:id', async (req, res) => {
       .select()
       .single();
 
-    if (error || !data) return res.status(404).json({ error: 'Client not found.' });
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Client not found.' });
+      }
+      throw error;
+    }
+    if (!data) return res.status(404).json({ error: 'Client not found.' });
     res.json({ success: true });
   } catch (err) {
     console.error('DELETE /api/clients/:id error:', err.message);
