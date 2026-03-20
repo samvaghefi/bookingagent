@@ -1255,6 +1255,75 @@ app.post('/admin/clone-vapi-for-sams', async (req, res) => {
   }
 });
 
+// ── POST /admin/patch-sams-prompt ────────────────────────────────────────────
+// Rebuilds Sam's Barbershop Vapi system prompt from vapi-system-prompt.txt
+// using real business data (hours, services) and PATCHes the live assistant.
+app.post('/admin/patch-sams-prompt', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const { buildSystemPrompt } = require('./vapiService');
+    const { createClient } = require('@supabase/supabase-js');
+    const axios = require('axios');
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+    const BUSINESS_ID = 'a09fdd0b-421e-479a-b4d7-120f6a72a043';
+
+    const { data: biz, error: bizErr } = await supabase
+      .from('businesses')
+      .select('*')
+      .eq('id', BUSINESS_ID)
+      .single();
+    if (bizErr) throw new Error('Supabase business: ' + bizErr.message);
+
+    const { data: services, error: svcErr } = await supabase
+      .from('services')
+      .select('*')
+      .eq('business_id', BUSINESS_ID);
+    if (svcErr) throw new Error('Supabase services: ' + svcErr.message);
+
+    const assistantId = biz.vapi_assistant_id;
+    if (!assistantId) throw new Error('No vapi_assistant_id on businesses row');
+
+    const systemPrompt = buildSystemPrompt(biz, {
+      services: services || [],
+      businessHours: biz.business_hours || null,
+    });
+
+    // Fetch current assistant to preserve model config
+    const getRes = await axios.get(
+      `https://api.vapi.ai/assistant/${assistantId}`,
+      { headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+    const current = getRes.data;
+    const messages = (current.model && current.model.messages) || [];
+    const sysMsgIndex = messages.findIndex(m => m.role === 'system');
+    const updatedMessages = [...messages];
+    if (sysMsgIndex >= 0) {
+      updatedMessages[sysMsgIndex] = { ...messages[sysMsgIndex], content: systemPrompt };
+    } else {
+      updatedMessages.push({ role: 'system', content: systemPrompt });
+    }
+
+    await axios.patch(
+      `https://api.vapi.ai/assistant/${assistantId}`,
+      { model: { ...current.model, messages: updatedMessages } },
+      { headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+
+    res.json({
+      ok: true,
+      assistantId,
+      promptSnippet: systemPrompt.substring(0, 300),
+    });
+  } catch (err) {
+    console.error('/admin/patch-sams-prompt error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /admin/patch-vapi-voice ───────────────────────────────────────────────
 // One-shot: sets the voiceId on the Vapi template assistant, keeping other voice settings.
 app.post('/admin/patch-vapi-voice', async (req, res) => {
