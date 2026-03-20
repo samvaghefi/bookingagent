@@ -2,6 +2,7 @@ const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const authMiddleware = require('./authMiddleware');
 const { cancelSubscription } = require('./billingService');
+const depositService = require('./depositService');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -25,7 +26,8 @@ router.get('/api/business', async (req, res) => {
         'business_hours', 'ai_name', 'business_type', 'billing_email',
         'subscription_status', 'trial_ends_at', 'stripe_customer_id',
         'stripe_subscription_id', 'is_active', 'created_at', 'call_recording_enabled', 'supported_languages',
-        'twilio_phone', 'timezone', 'barbers', 'plan'
+        'twilio_phone', 'timezone', 'barbers', 'plan',
+        'deposit_enabled', 'deposit_amount'
       ].join(', '))
       .eq('id', req.business.id)
       .single();
@@ -40,7 +42,7 @@ router.get('/api/business', async (req, res) => {
 
 // PUT /api/business — update allowed business fields
 router.put('/api/business', async (req, res) => {
-  const allowed = ['name', 'phone', 'address', 'business_hours', 'ai_name', 'business_type', 'timezone', 'barbers'];
+  const allowed = ['name', 'phone', 'address', 'business_hours', 'ai_name', 'business_type', 'timezone', 'barbers', 'deposit_enabled', 'deposit_amount'];
   const updates = {};
   allowed.forEach(field => {
     if (req.body[field] !== undefined) updates[field] = req.body[field];
@@ -660,6 +662,62 @@ router.put('/api/business/recording', async (req, res) => {
     res.json({ success: true, call_recording_enabled: enabled });
   } catch (err) {
     console.error('PUT /api/business/recording error:', err.message);
+    res.status(500).json({ error:
+// ── No-Show Deposits ──────────────────────────────────────────────────────────
+router.post('/api/bookings/:id/no-show', async (req, res) => {
+  try {
+    const { data: booking, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', req.params.id)
+      .eq('business_id', req.business.id)
+      .single();
+    if (error || !booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (booking.deposit_status !== 'secured') {
+      return res.status(400).json({ error: 'Booking does not have a secured deposit.' });
+    }
+    const { data: business } = await supabase
+      .from('businesses')
+      .select('deposit_amount')
+      .eq('id', req.business.id)
+      .single();
+    await depositService.chargeNoShow(booking, business);
+    const { data: updated } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', booking.id)
+      .single();
+    res.json({ booking: updated });
+  } catch (err) {
+    console.error('POST /api/bookings/:id/no-show error:', err.message);
+    const status = err.type === 'StripeCardError' ? 402 : 500;
+    res.status(status).json({ error: err.message || 'Failed to charge no-show deposit.' });
+  }
+});
+
+router.post('/api/bookings/:id/waive-deposit', async (req, res) => {
+  try {
+    const { data: booking, error } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', req.params.id)
+      .eq('business_id', req.business.id)
+      .single();
+    if (error || !booking) return res.status(404).json({ error: 'Booking not found.' });
+    if (!['pending', 'secured'].includes(booking.deposit_status)) {
+      return res.status(400).json({ error: 'Deposit cannot be waived in its current state.' });
+    }
+    await supabase.from('bookings').update({ deposit_status: 'waived' }).eq('id', booking.id);
+    const { data: updated } = await supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', booking.id)
+      .single();
+    res.json({ booking: updated });
+  } catch (err) {
+    console.error('POST /api/bookings/:id/waive-deposit error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+module.exports = router;
