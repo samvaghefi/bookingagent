@@ -303,7 +303,8 @@ app.post('/webhook/booking', async (req, res) => {
       const bookingData = extractFromToolCall(toolCallArgs);
       console.log('Extracted booking data:', bookingData);
 
-      const savedBooking = await saveBooking(business, bookingData, callId);
+      const depositStatus = business.deposit_enabled ? 'pending' : 'none';
+      const savedBooking = await saveBooking(business, bookingData, callId, depositStatus);
 
       // Send notifications (non-blocking)
       try {
@@ -346,7 +347,8 @@ app.post('/webhook/booking', async (req, res) => {
         return res.status(200).json({ success: false, message: 'Incomplete booking data' });
       }
 
-      const savedBooking = await saveBooking(business, bookingData, callId);
+      const depositStatus = business.deposit_enabled ? 'pending' : 'none';
+      const savedBooking = await saveBooking(business, bookingData, callId, depositStatus);
 
       try {
         await sendCustomerSMS(business, savedBooking);

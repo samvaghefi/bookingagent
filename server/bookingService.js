@@ -1,4 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
+const depositService = require('./depositService');
+const notificationService = require('./notificationService');
+const BASE_URL = process.env.BASE_URL || 'https://bookingagent-gmo2.onrender.com';
 
 // Convert "7 PM" to "19:00:00" format
 function convertTo24HourTime(timeStr) {
@@ -241,7 +244,7 @@ async function upsertClient(business, bookingData) {
 }
 
 // Save booking to database
-async function saveBooking(business, bookingData, vapiCallId) {
+async function saveBooking(business, bookingData, vapiCallId, depositStatus = 'none') {
   const record = {
     business_id: business.id,
     customer_name: bookingData.name,
@@ -251,7 +254,8 @@ async function saveBooking(business, bookingData, vapiCallId) {
     appointment_time: convertTo24HourTime(bookingData.time),
     special_requests: bookingData.specialRequests,
     vapi_call_id: vapiCallId,
-    status: 'confirmed'
+    status: 'confirmed',
+    deposit_status: depositStatus
   };
 
   // Include new fields only if they have values — avoids errors if columns don't exist yet
@@ -280,6 +284,18 @@ async function saveBooking(business, bookingData, vapiCallId) {
       console.log('Booking saved successfully:', retry.data.id);
       // Upsert client record — non-blocking (failure only logs a warning)
       await upsertClient(business, bookingData);
+      if (business.deposit_enabled) {
+        const token = depositService.createDepositToken(retry.data);
+        const depositUrl = `${BASE_URL}/deposit/${token}`;
+        await notificationService.sendDepositSMS(
+          bookingData.customerPhone,
+          bookingData.name,
+          business.name,
+          business.deposit_amount / 100,
+          depositUrl,
+          business.twilio_phone
+        );
+      }
       return retry.data;
     }
     console.error('Error saving booking:', error);
@@ -289,6 +305,18 @@ async function saveBooking(business, bookingData, vapiCallId) {
   console.log('Booking saved successfully:', data.id);
   // Upsert client record — non-blocking (failure only logs a warning)
   await upsertClient(business, bookingData);
+  if (business.deposit_enabled) {
+    const token = depositService.createDepositToken(data);
+    const depositUrl = `${BASE_URL}/deposit/${token}`;
+    await notificationService.sendDepositSMS(
+      bookingData.customerPhone,
+      bookingData.name,
+      business.name,
+      business.deposit_amount / 100,
+      depositUrl,
+      business.twilio_phone
+    );
+  }
   return data;
 }
 
