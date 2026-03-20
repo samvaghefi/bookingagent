@@ -1423,6 +1423,177 @@ function ClientsPage({ clients, setClients, setPage }) {
   );
 }
 
+
+// ── ClientProfilePage ─────────────────────────────────────────────────────────
+function ClientProfilePage({ clients, setClients, setPage }) {
+  const clientId = window._clientProfileId;
+  const [client, setClient]     = useState(null);
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [editing, setEditing]   = useState(false);
+  const [form, setForm]         = useState({ name: '', notes: '', tags: '' });
+  const [saving, setSaving]     = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [error, setError]       = useState('');
+
+  useEffect(() => {
+    if (!clientId) { setPage('clients'); return; }
+    apiFetch(`/api/clients/${clientId}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.client) {
+          setClient(d.client);
+          setBookings(d.bookings || []);
+          setForm({ name: d.client.name, notes: d.client.notes || '', tags: (d.client.tags || []).join(', ') });
+        } else {
+          setPage('clients');
+        }
+      })
+      .catch(() => setPage('clients'))
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  async function handleSave() {
+    setSaving(true); setError('');
+    try {
+      const r = await apiFetch(`/api/clients/${clientId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          notes: form.notes || null,
+          tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+        })
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error); return; }
+      setClient(d.client);
+      setClients(prev => prev.map(c => c.id === clientId ? { ...c, ...d.client } : c));
+      setEditing(false);
+    } catch { setError('Network error.'); }
+    finally { setSaving(false); }
+  }
+
+  async function handleDelete() {
+    try {
+      await apiFetch(`/api/clients/${clientId}`, { method: 'DELETE' });
+      setClients(prev => prev.filter(c => c.id !== clientId));
+      setPage('clients');
+    } catch { setError('Delete failed.'); }
+  }
+
+  if (loading) return <div className="page-content"><Spinner /></div>;
+  if (!client) return null;
+
+  return (
+    <div className="page-content">
+      <button className="filter-btn" onClick={() => setPage('clients')} style={{ marginBottom: '16px' }}>← Back to Clients</button>
+
+      <div className="card" style={{ marginBottom: '16px' }}>
+        {editing ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '480px' }}>
+            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '16px', fontWeight: 600 }} />
+            <textarea placeholder="Notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px', resize: 'vertical', minHeight: '80px' }} />
+            <input placeholder="Tags (comma-separated)" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
+              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }} />
+            {error && <div style={{ color: '#e53e3e', fontSize: '13px' }}>{error}</div>}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="filter-btn active" onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+              <button className="filter-btn" onClick={() => { setEditing(false); setError(''); }}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: '22px' }}>{client.name}</h2>
+                <div style={{ color: '#64748b', marginTop: '4px' }}>{client.phone}</div>
+                {(client.tags || []).length > 0 && (
+                  <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                    {client.tags.map(tag => (
+                      <span key={tag} style={{ background: '#ede9fe', color: '#6d28d9', padding: '2px 10px', borderRadius: '12px', fontSize: '12px' }}>{tag}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+                <button className="filter-btn" onClick={() => setEditing(true)}>Edit</button>
+                <button className="filter-btn" style={{ color: '#e53e3e' }} onClick={() => setConfirmDel(true)}>Delete</button>
+              </div>
+            </div>
+
+            {client.notes && (
+              <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', fontSize: '14px', color: '#475569' }}>
+                {client.notes}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', marginTop: '20px' }}>
+              {[
+                { label: 'Total Visits', value: client.visit_count ?? 0 },
+                { label: 'Last Visit', value: client.last_visit ? new Date(client.last_visit + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
+                { label: 'Preferred Service', value: client.preferred_service || '—' },
+                { label: 'Preferred Barber', value: client.preferred_barber || '—' },
+              ].map(stat => (
+                <div key={stat.label} style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</div>
+                  <div style={{ fontSize: '18px', fontWeight: 700, marginTop: '4px' }}>{stat.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {confirmDel && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', maxWidth: '380px', width: '90%' }}>
+            <h3 style={{ margin: '0 0 8px' }}>Delete {client.name}?</h3>
+            <p style={{ color: '#64748b', fontSize: '14px', margin: '0 0 20px' }}>
+              The client record will be removed. Their booking history will be preserved.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button className="filter-btn" onClick={() => setConfirmDel(false)}>Cancel</button>
+              <button className="filter-btn" style={{ background: '#fee2e2', color: '#e53e3e', border: 'none' }} onClick={handleDelete}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <h3 style={{ margin: '0 0 16px', fontSize: '16px' }}>Booking History</h3>
+        {bookings.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">📅</div>
+            <div className="empty-title">No bookings yet</div>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr><th>Date</th><th>Time</th><th>Service</th><th>Team Member</th><th>Special Requests</th></tr>
+              </thead>
+              <tbody>
+                {bookings.map(b => (
+                  <tr key={b.id}>
+                    <td>{b.appointment_date ? new Date(b.appointment_date + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                    <td>{b.appointment_time || '—'}</td>
+                    <td>{Array.isArray(b.service_ids) ? b.service_ids.join(', ') : b.service_ids || '—'}</td>
+                    <td>{b.preferred_barber || '—'}</td>
+                    <td className="cell-requests">{b.special_requests || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   const [authed, setAuthed]     = useState(false);
@@ -1471,6 +1642,7 @@ function App() {
     home:           'Dashboard',
     bookings:       'Bookings',
     clients:        'Clients',
+    'client-profile': 'Client Profile',
     settings:       'Settings',
     billing:        'Billing',
     onboarding:     'Setup',
@@ -1485,6 +1657,7 @@ function App() {
           {page === 'home'       && <DashboardHome />}
           {page === 'bookings'   && <BookingsPage clients={clients} setPage={setPage} />}
           {page === 'clients'    && <ClientsPage clients={clients} setClients={setClients} setPage={setPage} />}
+          {page === 'client-profile' && <ClientProfilePage clients={clients} setClients={setClients} setPage={setPage} />}
           {page === 'settings'   && <SettingsPage setPage={setPage} />}
           {page === 'billing'    && <BillingPage />}
           {page === 'onboarding' && <OnboardingPage setPage={setPage} />}
