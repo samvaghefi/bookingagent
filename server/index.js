@@ -1156,6 +1156,39 @@ app.post('/admin/generate-research-report', async (req, res) => {
   });
 });
 
+
+// ── POST /admin/patch-vapi-transcriber ─────────────────────────────────────────
+// One-shot: sets the transcriber on the Vapi template assistant.
+app.post('/admin/patch-vapi-transcriber', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const axios = require('axios');
+    const TEMPLATE_ID = '3f7183f9-4796-4104-8b08-015a4d675792';
+    const transcriber = req.body && req.body.transcriber
+      ? req.body.transcriber
+      : { provider: 'deepgram', model: 'nova-2', language: 'multi' };
+
+    await axios.patch(
+      `https://api.vapi.ai/assistant/${TEMPLATE_ID}`,
+      { transcriber },
+      { headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
+    );
+
+    // Fetch back to confirm
+    const { data } = await axios.get(
+      `https://api.vapi.ai/assistant/${TEMPLATE_ID}`,
+      { headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}` }, timeout: 15000 }
+    );
+    return res.json({ ok: true, transcriber: data.transcriber });
+  } catch (err) {
+    const msg = err.response ? `Vapi ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
+    return res.status(500).json({ error: msg });
+  }
+});
+
 // ── POST /admin/patch-vapi-template ────────────────────────────────────────────
 // Rewrites the Vapi template assistant's system prompt from vapi-system-prompt.txt.
 // Run once to fix a corrupted template. Requires x-admin-key header.
