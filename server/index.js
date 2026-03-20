@@ -1216,15 +1216,30 @@ app.post('/admin/clone-vapi-for-sams', async (req, res) => {
 
     const BUSINESS_ID = 'a09fdd0b-421e-479a-b4d7-120f6a72a043';
 
+    // Fetch business + services from Supabase
+    const { data: biz, error: bizErr } = await supabase
+      .from('businesses')
+      .select('id, name, address, timezone, supported_languages, business_hours, barbers')
+      .eq('id', BUSINESS_ID)
+      .single();
+    if (bizErr) throw new Error('Supabase business fetch failed: ' + bizErr.message);
+
+    const { data: svcRows, error: svcErr } = await supabase
+      .from('services')
+      .select('name, price, duration_minutes, description')
+      .eq('business_id', BUSINESS_ID)
+      .eq('is_active', true);
+    if (svcErr) throw new Error('Supabase services fetch failed: ' + svcErr.message);
+
     const business = {
-      id: BUSINESS_ID,
-      name: "Sam's Barbershop",
-      address: 'Toronto, Canada',
-      timezone: 'America/Toronto',
-      supported_languages: ['en', 'ko'],
+      ...biz,
+      supported_languages: biz.supported_languages || ['en', 'ko'],
     };
 
-    const assistantId = await createVapiAssistant(business);
+    const assistantId = await createVapiAssistant(business, {
+      services: svcRows || [],
+      businessHours: biz.business_hours || null,
+    });
 
     // Update businesses table
     const { error } = await supabase

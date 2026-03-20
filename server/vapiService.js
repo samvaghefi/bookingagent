@@ -12,6 +12,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const { formatBusinessHours, formatServices, getTimezoneInfo } = require('./vapiHelpers');
 
 // Load the canonical system prompt template from disk (version-controlled source of truth)
 const PROMPT_TEMPLATE_PATH = path.join(__dirname, '..', 'vapi-system-prompt.txt');
@@ -49,7 +50,7 @@ function vapiError(err) {
 
 // ── createVapiAssistant ───────────────────────────────────────────────────────
 // Clones the template assistant and customises it for the given business.
-async function createVapiAssistant(business) {
+async function createVapiAssistant(business, { services = [], businessHours = null } = {}) {
   // 1. Fetch template config
   let template;
   try {
@@ -68,17 +69,17 @@ async function createVapiAssistant(business) {
   const sysMsgIndex = messages.findIndex(m => m.role === 'system');
   let systemPrompt = loadSystemPromptTemplate();
 
-  // 3. Replace business-specific values in the prompt
-  const tz = business.timezone || 'America/Toronto';
-  const langs = Array.isArray(business.supported_languages)
-    ? business.supported_languages
-    : ['en'];
+  // 3. Substitute all business-specific placeholders
+  const tz    = business.timezone || 'America/Toronto';
+  const langs = Array.isArray(business.supported_languages) ? business.supported_languages : ['en'];
+  const tzInfo = getTimezoneInfo(tz);
 
   systemPrompt = systemPrompt
-    .replace(/Sam's Barbershop/g, business.name)
-    .replace(/\{\{businessName\}\}/g, business.name)
-    .replace(/America\/Toronto/g, tz)
-    .replace(/Toronto, Canada/g, business.address || 'Toronto, Canada');
+    .replace(/\{\{businessName\}\}/g,     business.name)
+    .replace(/\{\{businessLocation\}\}/g, business.address || tzInfo.location)
+    .replace(/\{\{timezoneLabel\}\}/g,    tzInfo.label)
+    .replace(/\{\{openingHours\}\}/g,     formatBusinessHours(businessHours || business.business_hours || null))
+    .replace(/\{\{services\}\}/g,         formatServices(services));
 
   if (!langs.includes('ko')) {
     systemPrompt = systemPrompt
@@ -131,7 +132,7 @@ async function createVapiAssistant(business) {
 
 // ── updateVapiAssistant ───────────────────────────────────────────────────────
 // Refreshes the services and barbers sections of an existing assistant's prompt.
-async function updateVapiAssistant(assistantId, business, services, barbers) {
+async function updateVapiAssistant(assistantId, business, services, barbers, { businessHours = null } = {}) {
   let current;
   try {
     const res = await axios.get(
@@ -163,6 +164,17 @@ async function updateVapiAssistant(assistantId, business, services, barbers) {
       systemPrompt = systemPrompt.replace(/SERVICES:[\s\S]*?(?=\n[A-Z]{2,}:|$)/, servicesBlock + '\n');
     } else {
       systemPrompt += `\n\n${servicesBlock}`;
+    }
+  }
+
+  // Update OPENING HOURS block if businessHours provided
+  if (businessHours !== null) {
+    const { formatBusinessHours } = require('./vapiHelpers');
+    const hoursBlock = `OPENING HOURS:\n${formatBusinessHours(businessHours)}`;
+    if (systemPrompt.includes('OPENING HOURS:')) {
+      systemPrompt = systemPrompt.replace(/OPENING HOURS:[\s\S]*?(?=\n[A-Z]{2,}[\s\w]*:|$)/, hoursBlock + '\n');
+    } else {
+      systemPrompt += `\n\n${hoursBlock}`;
     }
   }
 
