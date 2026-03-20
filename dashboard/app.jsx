@@ -140,7 +140,7 @@ function BarChart({ data, color }) {
 }
 
 // ── Bookings Table ────────────────────────────────────────────────────────────
-function BookingsTable({ bookings }) {
+function BookingsTable({ bookings, clients = [], onClientClick }) {
   if (!bookings.length) {
     return (
       <div className="empty-state">
@@ -169,7 +169,17 @@ function BookingsTable({ bookings }) {
           {bookings.map(b => (
             <tr key={b.id}>
               <td>
-                <div className="cell-name">{String(b.customer_name || '—')}</div>
+                <div
+                  className="cell-name"
+                  style={onClientClick && b.customer_phone ? { color: '#6366f1', textDecoration: 'underline', cursor: 'pointer' } : {}}
+                  onClick={() => {
+                    if (!onClientClick || !b.customer_phone) return;
+                    const match = clients.find(c => c.phone === b.customer_phone);
+                    onClientClick(match ? match.id : null, b.customer_phone);
+                  }}
+                >
+                  {String(b.customer_name || '—')}
+                </div>
               </td>
               <td>{String(b.customer_phone || '—')}</td>
               <td>{Array.isArray(b.service_ids) ? b.service_ids.join(', ') : String(b.service_ids || '—')}</td>
@@ -246,7 +256,7 @@ function DashboardHome() {
 }
 
 // ── Bookings Page ─────────────────────────────────────────────────────────────
-function BookingsPage() {
+function BookingsPage({ clients = [], setPage }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('month');
@@ -287,7 +297,21 @@ function BookingsPage() {
         ))}
       </div>
       <div className="card">
-        {loading ? <Spinner /> : <BookingsTable bookings={bookings} />}
+        {loading ? <Spinner /> : (
+          <BookingsTable
+            bookings={bookings}
+            clients={clients}
+            onClientClick={(clientId, phone) => {
+              if (clientId) {
+                window._clientProfileId = clientId;
+                setPage('client-profile');
+              } else {
+                window._clientsSearch = phone;
+                setPage('clients');
+              }
+            }}
+          />
+        )}
       </div>
     </div>
   );
@@ -1299,8 +1323,9 @@ function OnboardingPage({ setPage }) {
 
 // ── ClientsPage ───────────────────────────────────────────────────────────────
 function ClientsPage({ clients, setClients, setPage }) {
-  const [search, setSearch]       = useState('');
+  const [search, setSearch]       = useState(window._clientsSearch || '');
   const [tagFilter, setTagFilter] = useState(null);
+  useEffect(() => { window._clientsSearch = null; }, []);
   const [showForm, setShowForm]   = useState(false);
   const [form, setForm]           = useState({ name: '', phone: '', notes: '', tags: '' });
   const [saving, setSaving]       = useState(false);
