@@ -584,6 +584,13 @@ Also add `const BASE_URL = process.env.BASE_URL || 'https://bookingagent-gmo2.on
 // ── Deposit routes (public — no auth required) ────────────────────────────────
 // BASE_URL is NOT defined elsewhere in index.js — define it here.
 const BASE_URL = process.env.BASE_URL || 'https://bookingagent-gmo2.onrender.com';
+// Declare these once at block scope — not inside each handler.
+const jwt          = require('jsonwebtoken');
+const depositStripe = require('stripe')(
+  process.env.TEST_MODE === 'true'
+    ? process.env.STRIPE_TEST_SECRET_KEY
+    : process.env.STRIPE_SECRET_KEY
+);
 
 // IMPORTANT: /deposit/success and /deposit/cancel MUST be registered before
 // /deposit/:token, or Express will match the literal strings as token values.
@@ -623,13 +630,7 @@ app.get('/deposit/cancel', (req, res) => {
 });
 
 app.get('/deposit/:token', async (req, res) => {
-  const jwt = require('jsonwebtoken');
-  const Stripe = require('stripe');
-  const stripe = Stripe(
-    process.env.TEST_MODE === 'true'
-      ? process.env.STRIPE_TEST_SECRET_KEY
-      : process.env.STRIPE_SECRET_KEY
-  );
+  // jwt and depositStripe are declared at the top of this block — do not re-declare.
 
   // 1. Validate JWT
   let bookingId;
@@ -663,7 +664,7 @@ app.get('/deposit/:token', async (req, res) => {
     // On repeated link taps, reuse the existing customer to avoid orphaned records.
     let customerId = booking.stripe_customer_id;
     if (!customerId) {
-      const customer = await stripe.customers.create({
+      const customer = await depositStripe.customers.create({
         name:     booking.customer_name,
         phone:    booking.customer_phone,
         metadata: { booking_id: booking.id },
@@ -674,7 +675,7 @@ app.get('/deposit/:token', async (req, res) => {
     // 4. Create Stripe Checkout Session (setup mode)
     // IMPORTANT: do NOT include business_id in metadata — only booking_id.
     // The webhook dispatcher checks booking_id first to route deposit vs billing.
-    const session = await stripe.checkout.sessions.create({
+    const session = await depositStripe.checkout.sessions.create({
       mode:        'setup',
       customer:    customerId,
       metadata:    { booking_id: booking.id },
