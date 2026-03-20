@@ -75,7 +75,7 @@ try {
       {
         business_id: business.id,
         phone: bookingData.customerPhone,
-        name: bookingData.name,
+        name: bookingData.name,  // bookingData.name is correct — extractFromToolCall() maps customerName → name
         updated_at: new Date().toISOString()
       },
       {
