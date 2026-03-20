@@ -450,6 +450,94 @@ router.post('/api/clients', async (req, res) => {
   }
 });
 
+// GET /api/clients/:id — single client with stats + booking history
+router.get('/api/clients/:id', async (req, res) => {
+  try {
+    const { data: client, error: cErr } = await supabase
+      .from('clients')
+      .select('*')
+      .eq('id', req.params.id)
+      .eq('business_id', req.business.id)
+      .single();
+
+    if (cErr || !client) return res.status(404).json({ error: 'Client not found.' });
+
+    const [{ data: bookings, error: bErr }, { data: allBookings, error: abErr }] = await Promise.all([
+      supabase.from('bookings')
+        .select('*')
+        .eq('business_id', req.business.id)
+        .eq('customer_phone', client.phone)
+        .order('appointment_date', { ascending: false })
+        .order('appointment_time', { ascending: false }),
+      supabase.from('bookings')
+        .select('customer_phone, appointment_date, service_ids, preferred_barber')
+        .eq('business_id', req.business.id)
+        .eq('customer_phone', client.phone)
+    ]);
+
+    if (bErr) throw bErr;
+    if (abErr) throw abErr;
+
+    const stats = computeClientStats(allBookings || []);
+    const enriched = { ...client, ...(stats[client.phone] || { visit_count: 0, last_visit: null, preferred_service: null, preferred_barber: null }) };
+
+    res.json({ client: enriched, bookings: bookings || [] });
+  } catch (err) {
+    console.error('GET /api/clients/:id error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/clients/:id — update name, notes, tags (phone is not updatable)
+router.put('/api/clients/:id', async (req, res) => {
+  if (req.body.phone !== undefined) {
+    return res.status(400).json({ error: 'Phone number cannot be changed. Delete and re-add this client to change their number.' });
+  }
+
+  const allowed = ['name', 'notes', 'tags'];
+  const updates = { updated_at: new Date().toISOString() };
+  allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
+
+  if (Object.keys(updates).length === 1) {
+    return res.status(400).json({ error: 'No valid fields to update.' });
+  }
+
+  try {
+    const { data: client, error } = await supabase
+      .from('clients')
+      .update(updates)
+      .eq('id', req.params.id)
+      .eq('business_id', req.business.id)
+      .select()
+      .single();
+
+    if (error || !client) return res.status(404).json({ error: 'Client not found.' });
+    res.json({ client });
+  } catch (err) {
+    console.error('PUT /api/clients/:id error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/clients/:id — delete client only (bookings preserved)
+router.delete('/api/clients/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('clients')
+      .delete()
+      .eq('id', req.params.id)
+      .eq('business_id', req.business.id)
+      .select()
+      .single();
+
+    if (error || !data) return res.status(404).json({ error: 'Client not found.' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('DELETE /api/clients/:id error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Billing ───────────────────────────────────────────────────────────────────
 
 // GET /api/billing — subscription info from Stripe
