@@ -359,6 +359,94 @@ router.delete('/api/services/:id', async (req, res) => {
 // PUT /api/services/replace — delete all existing services and insert new list atomically
 
 
+// ── Clients ───────────────────────────────────────────────────────────────────
+
+// Helper: compute per-phone stats from a bookings array
+function computeClientStats(bookings) {
+  const stats = {};
+  for (const b of bookings) {
+    const phone = b.customer_phone;
+    if (!phone) continue;
+    if (!stats[phone]) {
+      stats[phone] = { visit_count: 0, last_visit: null, services: {}, barbers: {} };
+    }
+    const s = stats[phone];
+    s.visit_count++;
+    if (!s.last_visit || b.appointment_date > s.last_visit) {
+      s.last_visit = b.appointment_date;
+    }
+    const svc = Array.isArray(b.service_ids) ? b.service_ids[0] : b.service_ids;
+    if (svc) s.services[svc] = (s.services[svc] || 0) + 1;
+    if (b.preferred_barber) s.barbers[b.preferred_barber] = (s.barbers[b.preferred_barber] || 0) + 1;
+  }
+  // Reduce to preferred values
+  const result = {};
+  for (const [phone, s] of Object.entries(stats)) {
+    result[phone] = {
+      visit_count: s.visit_count,
+      last_visit: s.last_visit,
+      preferred_service: Object.keys(s.services).sort((a, b) => s.services[b] - s.services[a])[0] || null,
+      preferred_barber: Object.keys(s.barbers).sort((a, b) => s.barbers[b] - s.barbers[a])[0] || null,
+    };
+  }
+  return result;
+}
+
+// GET /api/clients — list all clients with computed stats
+router.get('/api/clients', async (req, res) => {
+  try {
+    const [{ data: clients, error: cErr }, { data: bookings, error: bErr }] = await Promise.all([
+      supabase.from('clients').select('*').eq('business_id', req.business.id).order('name'),
+      supabase.from('bookings')
+        .select('customer_phone, appointment_date, service_ids, preferred_barber')
+        .eq('business_id', req.business.id)
+    ]);
+
+    if (cErr) throw cErr;
+    if (bErr) throw bErr;
+
+    const stats = computeClientStats(bookings || []);
+
+    const enriched = (clients || []).map(c => ({
+      ...c,
+      ...(stats[c.phone] || { visit_count: 0, last_visit: null, preferred_service: null, preferred_barber: null })
+    }));
+
+    res.json({ clients: enriched });
+  } catch (err) {
+    console.error('GET /api/clients error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/clients — manually create a client
+router.post('/api/clients', async (req, res) => {
+  const { name, phone, notes, tags } = req.body;
+  if (!name || !phone) {
+    return res.status(400).json({ error: 'name and phone are required.' });
+  }
+
+  try {
+    const { data: client, error } = await supabase
+      .from('clients')
+      .insert({ business_id: req.business.id, name, phone, notes: notes || null, tags: tags || [] })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'A client with this phone number already exists.' });
+      }
+      throw error;
+    }
+
+    res.status(201).json({ client });
+  } catch (err) {
+    console.error('POST /api/clients error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Billing ───────────────────────────────────────────────────────────────────
 
 // GET /api/billing — subscription info from Stripe
