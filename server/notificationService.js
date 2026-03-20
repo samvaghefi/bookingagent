@@ -286,4 +286,22 @@ module.exports = {
   sendWelcomeEmail,
   sendInternalSignupNotification,
   sendPaymentFailedEmail,
+  sendDepositSMS,
 };
+
+// ── sendDepositSMS ────────────────────────────────────────────────────────────
+async function sendDepositSMS(customerPhone, customerName, businessName, depositAmountDollars, depositUrl, fromPhone) {
+  const message = `Hi ${customerName}, your ${businessName} appointment is confirmed!\nTo secure your spot with a $${depositAmountDollars} deposit, tap: ${depositUrl}\n(Only charged if you miss your appointment.)`;
+  try {
+    await twilioClient.messages.create({
+      body: message,
+      from: fromPhone,
+      to: customerPhone,
+    });
+    console.log(`📱 Deposit SMS sent to ${customerPhone}`);
+    return true;
+  } catch (error) {
+    console.error('Deposit SMS error:', error);
+    return false;
+  }
+}
