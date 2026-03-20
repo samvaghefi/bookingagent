@@ -1224,6 +1224,8 @@ app.get('/admin/vapi-template', async (req, res) => {
       assistantId: r.data.id,
       assistantName: r.data.name,
       systemPrompt: sys ? sys.content : null,
+      transcriber: r.data.transcriber || null,
+      voice: r.data.voice || null,
       allFields: Object.keys(r.data),
     });
   } catch (err) {
