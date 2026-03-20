@@ -37,6 +37,7 @@ function Sidebar({ page, setPage, business }) {
   const navItems = [
     { id: 'home',      label: 'Dashboard', icon: '◫' },
     { id: 'bookings',  label: 'Bookings',  icon: '📅' },
+    { id: 'queue',     label: 'Walk-in Queue', icon: '🪑' },
     { id: 'clients',   label: 'Clients',   icon: '👤' },
     { id: 'settings',  label: 'Settings',  icon: '⚙' },
     { id: 'billing',   label: 'Billing',   icon: '💳' },
@@ -252,6 +253,7 @@ function DashboardHome() {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [queue, setQueue] = useState([]);
 
   useEffect(() => {
     Promise.all([
@@ -264,6 +266,19 @@ function DashboardHome() {
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
+  }, []);
+
+  // Independent queue poll — runs regardless of analytics load state
+  useEffect(() => {
+    const fetchQueue = () => {
+      apiFetch('/api/queue')
+        .then(r => r.json())
+        .then(d => setQueue(d.queue || []))
+        .catch(() => {});
+    };
+    fetchQueue();
+    const interval = setInterval(fetchQueue, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) return <Spinner />;
@@ -292,6 +307,45 @@ function DashboardHome() {
           <BarChart data={popularServices} color="#D85A30" />
         </div>
       </div>
+
+      {queue.length > 0 && (
+        <div className="card">
+          <div className="card-header">
+            Walk-in Queue
+            <span className="status-badge" style={{ background: '#fef3c7', color: '#92400e', marginLeft: 10 }}>
+              {queue.length} waiting
+            </span>
+          </div>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr><th>#</th><th>Name</th><th>Service</th><th>Waited</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {queue.map(entry => {
+                  const waited = Math.floor((Date.now() - new Date(entry.created_at).getTime()) / 60000);
+                  return (
+                    <tr key={entry.id}>
+                      <td style={{ fontWeight: 700, color: '#534AB7' }}>{entry.position}</td>
+                      <td>{entry.customer_name}</td>
+                      <td>{entry.service || '—'}</td>
+                      <td style={{ color: waited > 20 ? '#ef4444' : '#374151' }}>{waited}m</td>
+                      <td>
+                        <span className="status-badge" style={{
+                          background: entry.status === 'notified' ? '#d1fae5' : '#fef3c7',
+                          color: entry.status === 'notified' ? '#065f46' : '#92400e',
+                        }}>
+                          {entry.status === 'notified' ? 'Notified' : 'Waiting'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-header">Recent Bookings</div>
@@ -368,6 +422,123 @@ function BookingsPage({ clients = [], setPage }) {
               }
             }}
           />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── WalkInQueueSettings ───────────────────────────────────────────────────────
+function WalkInQueueSettings({ business, setBusiness }) {
+  const [saving, setSaving]     = useState(false);
+  const [msg, setMsg]           = useState('');
+  const [qrUrl, setQrUrl]       = useState(null);
+  const qrBlobRef               = useRef(null);
+
+  // Load QR when queue_enabled is true
+  useEffect(() => {
+    if (!business?.queue_enabled) return;
+    apiFetch('/api/queue/qr')
+      .then(r => r.blob())
+      .then(blob => {
+        // Revoke previous blob URL to avoid memory leaks
+        if (qrBlobRef.current) URL.revokeObjectURL(qrBlobRef.current);
+        const url = URL.createObjectURL(blob);
+        qrBlobRef.current = url;
+        setQrUrl(url);
+      })
+      .catch(() => {});
+    return () => {
+      if (qrBlobRef.current) {
+        URL.revokeObjectURL(qrBlobRef.current);
+        qrBlobRef.current = null;
+      }
+    };
+  }, [business?.queue_enabled]);
+
+  const handleSave = async () => {
+    setSaving(true); setMsg('');
+    try {
+      await apiFetch('/api/business', {
+        method: 'PUT',
+        body: JSON.stringify({
+          queue_enabled:        business.queue_enabled,
+          queue_notify_timeout: parseInt(business.queue_notify_timeout || 10, 10),
+        }),
+      });
+      setMsg('Saved!');
+      setTimeout(() => setMsg(''), 2500);
+    } catch {
+      setMsg('Failed to save.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-header">Walk-in Queue</div>
+      <div className="settings-grid">
+        <div className="form-group full-width">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
+            <input
+              type="checkbox"
+              id="queueToggle"
+              checked={!!business?.queue_enabled}
+              onChange={e => setBusiness(b => ({ ...b, queue_enabled: e.target.checked }))}
+              style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#534AB7' }}
+            />
+            <label htmlFor="queueToggle" style={{ margin: 0, fontWeight: 400, fontSize: 14, color: '#374151', cursor: 'pointer' }}>
+              Enable walk-in queue (QR code check-in)
+            </label>
+          </div>
+        </div>
+
+        {business?.queue_enabled && (
+          <>
+            <div className="form-group">
+              <label>No-show timeout (minutes)</label>
+              <input
+                type="number"
+                min="1"
+                max="60"
+                step="1"
+                value={business?.queue_notify_timeout ?? 10}
+                onChange={e => setBusiness(b => ({ ...b, queue_notify_timeout: parseInt(e.target.value) || 10 }))}
+                style={{ width: 120 }}
+              />
+              <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>
+                Customers are auto-marked no-show this many minutes after being notified.
+              </p>
+            </div>
+
+            <div className="form-group full-width">
+              <label>Walk-in QR Code</label>
+              {qrUrl ? (
+                <div style={{ marginTop: 8 }}>
+                  <img src={qrUrl} alt="Walk-in queue QR code" style={{ width: 180, height: 180, display: 'block', marginBottom: 10 }} />
+                  <a
+                    href={qrUrl}
+                    download="walkin-qr.png"
+                    className="btn-outline"
+                    style={{ fontSize: 13, display: 'inline-block', textDecoration: 'none' }}
+                  >
+                    Download QR
+                  </a>
+                </div>
+              ) : (
+                <div style={{ color: '#9ca3af', fontSize: 13, marginTop: 6 }}>Loading QR code...</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      <div className="save-row">
+        <button className="btn-primary" onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Queue Settings'}
+        </button>
+        {msg && (
+          <span className={`save-msg ${msg === 'Saved!' ? 'success' : 'error'}`}>{msg}</span>
         )}
       </div>
     </div>
@@ -766,6 +937,9 @@ function SettingsPage({ setPage }) {
           )}
         </div>
       </div>
+
+      {/* ── Walk-in Queue ── */}
+      <WalkInQueueSettings business={business} setBusiness={setBusiness} />
 
       {/* ── AI Agent Settings ── */}
       <div className="card">
@@ -1786,6 +1960,139 @@ function ClientProfilePage({ clients, setClients, setPage }) {
   );
 }
 
+// ── QueuePage ─────────────────────────────────────────────────────────────────
+function QueuePage() {
+  const [queue, setQueue]     = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState({});
+
+  const fetchQueue = () => {
+    apiFetch('/api/queue')
+      .then(r => r.json())
+      .then(d => setQueue(d.queue || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchQueue();
+    const interval = setInterval(fetchQueue, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const action = async (id, endpoint, label) => {
+    setActionLoading(s => ({ ...s, [id + endpoint]: true }));
+    try {
+      const res = await apiFetch(`/api/queue/${id}/${endpoint}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || `${label} failed.`); return; }
+      setQueue(q => q.filter(e => e.id !== id));
+    } catch { alert(`${label} failed. Please try again.`); }
+    finally { setActionLoading(s => ({ ...s, [id + endpoint]: false })); }
+  };
+
+  const STATUS_COLORS = {
+    waiting:  { bg: '#fef3c7', color: '#92400e', label: 'Waiting' },
+    notified: { bg: '#d1fae5', color: '#065f46', label: 'Notified' },
+  };
+
+  if (loading) return <Spinner />;
+
+  return (
+    <div className="page-content">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: '#6b7280' }}>
+          {queue.length === 0 ? 'No one in queue' : `${queue.length} customer${queue.length > 1 ? 's' : ''} waiting`}
+        </div>
+        <button className="btn-outline" style={{ fontSize: 13 }} onClick={fetchQueue}>Refresh</button>
+      </div>
+
+      {queue.length === 0 ? (
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-icon">🪑</div>
+            <div className="empty-title">Queue is empty</div>
+            <div className="empty-sub">Customers can join via QR code in Settings → Walk-in Queue</div>
+          </div>
+        </div>
+      ) : (
+        <div className="card">
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Name</th>
+                  <th>Phone</th>
+                  <th>Service</th>
+                  <th>Team Member</th>
+                  <th>Status</th>
+                  <th>Waited</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queue.map(entry => {
+                  const s = STATUS_COLORS[entry.status] || { bg: '#f3f4f6', color: '#6b7280', label: entry.status };
+                  const waited = Math.floor((Date.now() - new Date(entry.created_at).getTime()) / 60000);
+                  const isNotifying = actionLoading[entry.id + 'notify'];
+                  const isServing   = actionLoading[entry.id + 'serve'];
+                  const isRemoving  = actionLoading[entry.id + 'remove'];
+                  return (
+                    <tr key={entry.id}>
+                      <td style={{ fontWeight: 700, color: '#534AB7' }}>{entry.position}</td>
+                      <td><div className="cell-name">{entry.customer_name}</div></td>
+                      <td>{entry.customer_phone}</td>
+                      <td>{entry.service || '—'}</td>
+                      <td>{entry.preferred_barber || '—'}</td>
+                      <td>
+                        <span className="status-badge" style={{ background: s.bg, color: s.color }}>
+                          {s.label}
+                        </span>
+                      </td>
+                      <td style={{ color: waited > 20 ? '#ef4444' : '#374151' }}>{waited}m</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {entry.status === 'waiting' && (
+                            <button
+                              className="btn-outline"
+                              style={{ fontSize: 12, padding: '3px 10px', color: '#059669', borderColor: '#059669' }}
+                              disabled={isNotifying}
+                              onClick={() => action(entry.id, 'notify', 'Notify')}
+                            >
+                              {isNotifying ? '...' : 'Notify'}
+                            </button>
+                          )}
+                          <button
+                            className="btn-outline"
+                            style={{ fontSize: 12, padding: '3px 10px' }}
+                            disabled={isServing}
+                            onClick={() => action(entry.id, 'serve', 'Serve')}
+                          >
+                            {isServing ? '...' : 'Served'}
+                          </button>
+                          <button
+                            className="btn-outline"
+                            style={{ fontSize: 12, padding: '3px 10px', color: '#9ca3af', borderColor: '#d1d5db' }}
+                            disabled={isRemoving}
+                            onClick={() => action(entry.id, 'remove', 'Remove')}
+                          >
+                            {isRemoving ? '...' : 'Remove'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   const [authed, setAuthed]     = useState(false);
@@ -1833,6 +2140,7 @@ function App() {
   const titles = {
     home:           'Dashboard',
     bookings:       'Bookings',
+    queue:          'Walk-in Queue',
     clients:        'Clients',
     'client-profile': 'Client Profile',
     settings:       'Settings',
@@ -1848,6 +2156,7 @@ function App() {
         <div className="content-area">
           {page === 'home'       && <DashboardHome />}
           {page === 'bookings'   && <BookingsPage clients={clients} setPage={setPage} />}
+          {page === 'queue'      && <QueuePage />}
           {page === 'clients'    && <ClientsPage clients={clients} setClients={setClients} setPage={setPage} />}
           {page === 'client-profile' && <ClientProfilePage clients={clients} setClients={setClients} setPage={setPage} />}
           {page === 'settings'   && <SettingsPage setPage={setPage} />}

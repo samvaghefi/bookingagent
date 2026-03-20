@@ -280,6 +280,23 @@ async function sendPaymentFailedEmail(business) {
   }
 }
 
+// ── sendQueueReadySMS ─────────────────────────────────────────────────────────
+async function sendQueueReadySMS(customerPhone, customerName, businessName, fromPhone) {
+  const message = `Hi ${customerName}, it's your turn at ${businessName}! Please come to the front now.`;
+  try {
+    await twilioClient.messages.create({
+      body: message,
+      from: fromPhone,
+      to: customerPhone,
+    });
+    console.log(`📱 Queue ready SMS sent to ${customerPhone}`);
+    return true;
+  } catch (error) {
+    console.error('Queue ready SMS error:', error);
+    throw error;
+  }
+}
+
 module.exports = {
   sendCustomerSMS,
   sendOwnerEmail,
@@ -287,6 +304,7 @@ module.exports = {
   sendInternalSignupNotification,
   sendPaymentFailedEmail,
   sendDepositSMS,
+  sendQueueReadySMS,
 };
 
 // ── sendDepositSMS ────────────────────────────────────────────────────────────

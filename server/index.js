@@ -34,6 +34,7 @@ const session = require('express-session');
 const dashboardRoutes = require('./dashboardRoutes');
 const authRoutes = require('./authRoutes');
 const intelRoutes = require('./intelRoutes');
+const queueService = require('./queueService');
 
 const app = express();
 
@@ -1179,6 +1180,108 @@ app.post('/onboarding/complete', authMiddlewareFn, async (req, res) => {
   }
 });
 
+// ── Walk-in Queue (public) ────────────────────────────────────────────────────
+// GET /q/:businessId — mobile form for customers to join the queue
+app.get('/q/:businessId', async (req, res) => {
+  const { data: business, error } = await supabase
+    .from('businesses')
+    .select('name, queue_enabled')
+    .eq('id', req.params.businessId)
+    .single();
+
+  if (error || !business) return res.status(404).send('Business not found.');
+  if (!business.queue_enabled) {
+    return res.status(403).send('Walk-in queue is not enabled for this business.');
+  }
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Join Queue — ${business.name}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #f8fafc; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .card { background: #fff; border-radius: 12px; padding: 32px 24px; max-width: 420px; width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    h1 { font-size: 22px; color: #111827; margin-bottom: 6px; }
+    .sub { font-size: 14px; color: #6b7280; margin-bottom: 24px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 4px; margin-top: 14px; }
+    input, select { width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 15px; color: #111827; background: #fff; }
+    button { margin-top: 20px; width: 100%; padding: 13px; background: #534AB7; color: #fff; font-size: 16px; font-weight: 700; border: none; border-radius: 8px; cursor: pointer; }
+    button:active { background: #4338ca; }
+    .success { text-align: center; padding: 24px 0; }
+    .success h2 { font-size: 24px; color: #10b981; margin-bottom: 8px; }
+    .success p { color: #374151; font-size: 15px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="formCard">
+    <h1>Join the Queue</h1>
+    <p class="sub">${business.name} — walk-in waitlist</p>
+    <form id="joinForm">
+      <label>Your Name *</label>
+      <input type="text" id="name" placeholder="e.g. Alex" required>
+      <label>Phone Number *</label>
+      <input type="tel" id="phone" placeholder="+1 (416) 555-0000" required>
+      <label>Service (optional)</label>
+      <input type="text" id="service" placeholder="e.g. Haircut">
+      <label>Team Member Preference (optional)</label>
+      <input type="text" id="barber" placeholder="e.g. Sam, or leave blank">
+      <button type="submit" id="submitBtn">Join Queue</button>
+    </form>
+  </div>
+  <script>
+    document.getElementById('joinForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true; btn.textContent = 'Joining...';
+      try {
+        const res = await fetch('/q/${req.params.businessId}', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerName: document.getElementById('name').value.trim(),
+            customerPhone: document.getElementById('phone').value.trim(),
+            service: document.getElementById('service').value.trim() || null,
+            preferredBarber: document.getElementById('barber').value.trim() || null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { alert(data.error || 'Something went wrong.'); btn.disabled = false; btn.textContent = 'Join Queue'; return; }
+        document.getElementById('formCard').innerHTML = '<div class="success"><h2>You\\'re in!</h2><p>You are #' + data.position + ' in the queue.<br>We\\'ll text you when it\\'s your turn.</p></div>';
+      } catch { alert('Network error. Please try again.'); btn.disabled = false; btn.textContent = 'Join Queue'; }
+    });
+  </script>
+</body>
+</html>`);
+});
+
+// POST /q/:businessId — submit walk-in queue entry
+app.post('/q/:businessId', async (req, res) => {
+  try {
+    const { data: business, error } = await supabase
+      .from('businesses')
+      .select('queue_enabled')
+      .eq('id', req.params.businessId)
+      .single();
+    if (error || !business) return res.status(404).json({ error: 'Business not found.' });
+    if (!business.queue_enabled) return res.status(403).json({ error: 'Queue is not enabled.' });
+
+    const { customerName, customerPhone, service, preferredBarber } = req.body;
+    if (!customerName || !customerPhone) {
+      return res.status(400).json({ error: 'Name and phone are required.' });
+    }
+    const result = await queueService.joinQueue(req.params.businessId, {
+      customerName, customerPhone, service, preferredBarber,
+    });
+    res.json({ position: result.position, entry: result.entry });
+  } catch (err) {
+    console.error('POST /q/:businessId error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /health ──────────────────────────────────────────────────────────────
 app.get('/health', (req, res) => {
   res.json({
@@ -1673,6 +1776,7 @@ app.post('/admin/test-provisioning', express.json(), async (req, res) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
+  setInterval(() => queueService.autoExpireNoShows(), 60_000);
   console.log(`🚀 BookingAgent server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV}`);
   console.log(`🔗 Health check: http://localhost:${PORT}`);

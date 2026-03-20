@@ -3,6 +3,10 @@ const { createClient } = require('@supabase/supabase-js');
 const authMiddleware = require('./authMiddleware');
 const { cancelSubscription } = require('./billingService');
 const depositService = require('./depositService');
+const QRCode = require('qrcode');
+const queueService = require('./queueService');
+
+const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://bookingagent-gmo2.onrender.com';
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -27,7 +31,8 @@ router.get('/api/business', async (req, res) => {
         'subscription_status', 'trial_ends_at', 'stripe_customer_id',
         'stripe_subscription_id', 'is_active', 'created_at', 'call_recording_enabled', 'supported_languages',
         'twilio_phone', 'timezone', 'barbers', 'plan',
-        'deposit_enabled', 'deposit_amount'
+        'deposit_enabled', 'deposit_amount',
+        'queue_enabled', 'queue_notify_timeout'
       ].join(', '))
       .eq('id', req.business.id)
       .single();
@@ -42,7 +47,7 @@ router.get('/api/business', async (req, res) => {
 
 // PUT /api/business — update allowed business fields
 router.put('/api/business', async (req, res) => {
-  const allowed = ['name', 'phone', 'address', 'business_hours', 'ai_name', 'business_type', 'timezone', 'barbers', 'deposit_enabled', 'deposit_amount'];
+  const allowed = ['name', 'phone', 'address', 'business_hours', 'ai_name', 'business_type', 'timezone', 'barbers', 'deposit_enabled', 'deposit_amount', 'queue_enabled', 'queue_notify_timeout'];
   const updates = {};
   allowed.forEach(field => {
     if (req.body[field] !== undefined) updates[field] = req.body[field];
@@ -719,6 +724,105 @@ router.post('/api/bookings/:id/waive-deposit', async (req, res) => {
     res.json({ booking: updated });
   } catch (err) {
     console.error('POST /api/bookings/:id/waive-deposit error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Walk-in Queue ─────────────────────────────────────────────────────────────
+
+// IMPORTANT: /api/queue/qr MUST be registered before /api/queue/:id/* routes
+// to prevent Express from matching "qr" as an :id parameter.
+
+// GET /api/queue/qr — generate QR code image pointing to the public walk-in form
+router.get('/api/queue/qr', async (req, res) => {
+  try {
+    const url = `${BASE_URL}/q/${req.business.id}`;
+    const qrBuffer = await QRCode.toBuffer(url, { width: 300, margin: 2 });
+    res.set('Content-Type', 'image/png');
+    res.send(qrBuffer);
+  } catch (err) {
+    console.error('GET /api/queue/qr error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/queue — fetch active queue for this business
+router.get('/api/queue', async (req, res) => {
+  try {
+    const queue = await queueService.getActiveQueue(req.business.id);
+    res.json({ queue });
+  } catch (err) {
+    console.error('GET /api/queue error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/queue/:id/notify — send "you're up" SMS
+router.post('/api/queue/:id/notify', async (req, res) => {
+  try {
+    const entry = await queueService.notifyCustomer(
+      req.params.id,
+      req.business.id,
+      req.business.name,
+      req.business.twilio_phone
+    );
+    res.json({ entry });
+  } catch (err) {
+    console.error('POST /api/queue/:id/notify error:', err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// POST /api/queue/:id/serve — mark as served
+router.post('/api/queue/:id/serve', async (req, res) => {
+  try {
+    const { data: entry, error } = await supabase
+      .from('walk_in_queue')
+      .update({ status: 'served', served_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .eq('business_id', req.business.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ entry });
+  } catch (err) {
+    console.error('POST /api/queue/:id/serve error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/queue/:id/no-show — mark as no_show
+router.post('/api/queue/:id/no-show', async (req, res) => {
+  try {
+    const { data: entry, error } = await supabase
+      .from('walk_in_queue')
+      .update({ status: 'no_show' })
+      .eq('id', req.params.id)
+      .eq('business_id', req.business.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ entry });
+  } catch (err) {
+    console.error('POST /api/queue/:id/no-show error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/queue/:id/remove — remove from queue (cancel/mistake)
+router.post('/api/queue/:id/remove', async (req, res) => {
+  try {
+    const { data: entry, error } = await supabase
+      .from('walk_in_queue')
+      .update({ status: 'removed', removed_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .eq('business_id', req.business.id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ entry });
+  } catch (err) {
+    console.error('POST /api/queue/:id/remove error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

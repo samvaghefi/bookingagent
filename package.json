@@ -29,6 +29,7 @@
     "axios": "^1.7.9",
     "cheerio": "^1.0.0",
     "rss-parser": "^3.13.0",
-    "puppeteer": "^22.0.0"
+    "puppeteer": "^22.0.0",
+    "qrcode": "^1.5.4"
   }
 }
