@@ -46,17 +46,17 @@ CREATE TABLE clients (
   updated_at  timestamptz DEFAULT now(),
   UNIQUE (business_id, phone)
 );
-
-CREATE INDEX idx_clients_business_phone ON clients (business_id, phone);
 ```
+
+**Note:** The `UNIQUE (business_id, phone)` constraint implicitly creates a btree index on those columns — no separate `CREATE INDEX` is needed.
 
 **Key decisions:**
 - `(business_id, phone)` is the natural unique identity — phone is the primary identifier for call-in/walk-in clients.
 - `tags` stored as a Postgres `text[]` array — sufficient at current scale, no join table needed.
 - Stats (visit count, last visit, preferred service/barber) are computed at query time from the `bookings` table — not denormalized onto the row.
-- `updated_at` is refreshed on every upsert and manual edit — reserved for future AI lookup freshness checks.
+- `updated_at` is refreshed on every upsert and manual edit — reserved for future AI lookup freshness checks. No Postgres trigger is defined; the value is explicitly set in the upsert payload.
 
-**Migration file:** `/database/migrations/add-clients-table.sql`
+**Migration file:** `/scripts/migrations/add-clients-table.sql` (create this directory)
 Run manually in the Supabase SQL editor before deploying.
 
 ---
@@ -102,6 +102,24 @@ All routes added to `server/dashboardRoutes.js`. All require JWT auth (existing 
 
 Returns all clients for the authenticated business with computed stats.
 
+**Stats query:** Stats are computed in a single SQL join. The bookings subquery **must** filter on `bookings.business_id = <authenticated business id>` — do not rely solely on the join to `clients` — to prevent any risk of cross-tenant data leakage.
+
+Example query structure:
+```sql
+SELECT
+  c.*,
+  COUNT(b.id)                   AS visit_count,
+  MAX(b.appointment_date)       AS last_visit,
+  MODE() WITHIN GROUP (ORDER BY b.service_ids[1]) AS preferred_service,
+  MODE() WITHIN GROUP (ORDER BY b.preferred_barber) AS preferred_barber
+FROM clients c
+LEFT JOIN bookings b
+  ON b.customer_phone = c.phone
+  AND b.business_id = c.business_id   -- explicit tenant guard
+WHERE c.business_id = $1
+GROUP BY c.id;
+```
+
 **Response:**
 ```json
 {
@@ -123,8 +141,6 @@ Returns all clients for the authenticated business with computed stats.
 }
 ```
 
-Stats computed via a single SQL join: `bookings GROUP BY customer_phone` joined to `clients`.
-
 ### `POST /api/clients`
 
 Manually create a client. Body: `{ name, phone, notes?, tags? }`.
@@ -134,19 +150,15 @@ Returns 409 with user-facing message if `(business_id, phone)` already exists.
 
 Single client profile with full booking history.
 
-**Response:** client object (with stats) + `bookings: []` ordered newest first.
+**Response:** client object (with stats) + `bookings: []` ordered newest first. No separate paginated sub-resource — loading all bookings for one client is acceptable at current scale.
 
 ### `PUT /api/clients/:id`
 
-Update `name`, `phone`, `notes`, `tags`. Ownership verified (`client.business_id === req.business.id`). Returns 404 if not found/not owned.
+Update `name`, `notes`, `tags`. **`phone` is not updatable** — changing a phone number would orphan the upsert identity key, causing future bookings on the old number to create a new duplicate client. Ownership verified (`client.business_id === req.business.id`). Returns 404 if not found/not owned.
 
 ### `DELETE /api/clients/:id`
 
 Delete the client record. Bookings are preserved (no cascade). Returns 404 if not found/not owned.
-
-### `GET /api/clients/:id/bookings`
-
-Paginated booking history for a client. Supports `?limit=` and `?offset=` query params.
 
 ---
 
@@ -155,6 +167,10 @@ Paginated booking history for a client. Supports `?limit=` and `?offset=` query 
 ### Sidebar
 
 Add "Clients" tab between Bookings and Settings in the `Sidebar` component (`dashboard/app.jsx`).
+
+### Client list state
+
+`GET /api/clients` is fetched once on app mount and stored in top-level `App` state (alongside how services are handled). This makes the list immediately available to both the Clients screen and the Bookings screen click-through without extra fetches.
 
 ### `ClientsPage` (new screen)
 
@@ -176,7 +192,7 @@ Add "Clients" tab between Bookings and Settings in the `Sidebar` component (`das
 ### Bookings table change
 
 `customer_name` becomes a clickable link. On click:
-1. Match the client by phone from the already-fetched client list (or fetch `GET /api/clients` if not loaded).
+1. Look up the client by phone in the app-level client list (already loaded on mount).
 2. Navigate to `ClientProfilePage` for that client.
 3. If no matching client record exists (edge case during rollout), navigate to `ClientsPage` with the phone pre-filled in the search bar.
 
@@ -190,6 +206,7 @@ Add "Clients" tab between Bookings and Settings in the `Sidebar` component (`das
 |---|---|
 | Client upsert fails during booking | Log warning, do not throw — booking proceeds normally |
 | `POST /api/clients` with duplicate phone | 409 + "A client with this phone number already exists." |
+| `PUT /api/clients/:id` with `phone` in body | 400 + "Phone number cannot be changed. Delete and re-add this client to change their number." |
 | `GET/PUT/DELETE /api/clients/:id` — wrong business | 404 |
 | Any unhandled server error | 500 + `{ error: err.message }` |
 
@@ -197,13 +214,17 @@ Add "Clients" tab between Bookings and Settings in the `Sidebar` component (`das
 
 ## Scripts
 
+### `/scripts/migrations/add-clients-table.sql`
+
+SQL migration. Run manually in Supabase SQL editor before deploying.
+
 ### `/scripts/backfill-clients.js`
 
 One-time script. Groups all existing bookings by `(business_id, customer_phone)`, upserts a client row for each unique phone using the most recent booking's `customer_name`. Logs progress. Run manually after migration.
 
 ### `/scripts/test-client-profiles.js`
 
-Manual QA script. Hits each API endpoint in sequence: create, list, get by ID, update notes/tags, delete. Follows the pattern of existing scripts in `/scripts`.
+Manual QA script. Hits each API endpoint in sequence: create, list, get by ID, update notes/tags, attempt phone update (expect 400), delete. Follows the pattern of existing scripts in `/scripts`.
 
 ---
 
