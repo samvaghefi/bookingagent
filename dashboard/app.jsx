@@ -37,6 +37,7 @@ function Sidebar({ page, setPage, business }) {
   const navItems = [
     { id: 'home',      label: 'Dashboard', icon: '◫' },
     { id: 'bookings',  label: 'Bookings',  icon: '📅' },
+    { id: 'clients',   label: 'Clients',   icon: '👤' },
     { id: 'settings',  label: 'Settings',  icon: '⚙' },
     { id: 'billing',   label: 'Billing',   icon: '💳' },
     { id: 'onboarding', label: 'Setup Wizard', icon: '✨' },
@@ -1296,11 +1297,138 @@ function OnboardingPage({ setPage }) {
   );
 }
 
+// ── ClientsPage ───────────────────────────────────────────────────────────────
+function ClientsPage({ clients, setClients, setPage }) {
+  const [search, setSearch]       = useState('');
+  const [tagFilter, setTagFilter] = useState(null);
+  const [showForm, setShowForm]   = useState(false);
+  const [form, setForm]           = useState({ name: '', phone: '', notes: '', tags: '' });
+  const [saving, setSaving]       = useState(false);
+  const [error, setError]         = useState('');
+
+  // Collect all unique tags across all clients
+  const allTags = [...new Set(clients.flatMap(c => c.tags || []))].sort();
+
+  const filtered = clients.filter(c => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || c.name.toLowerCase().includes(q) || (c.phone || '').includes(q);
+    const matchTag = !tagFilter || (c.tags || []).includes(tagFilter);
+    return matchSearch && matchTag;
+  });
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    setSaving(true); setError('');
+    try {
+      const r = await apiFetch('/api/clients', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: form.name,
+          phone: form.phone,
+          notes: form.notes || undefined,
+          tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+        })
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || 'Failed to create client.'); return; }
+      setClients(prev => [d.client, ...prev]);
+      setShowForm(false);
+      setForm({ name: '', phone: '', notes: '', tags: '' });
+    } catch (err) {
+      setError('Network error.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="page-content">
+      <div className="filter-bar" style={{ gap: '8px', flexWrap: 'wrap' }}>
+        <input
+          placeholder="Search by name or phone..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ padding: '6px 12px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '14px', minWidth: '220px' }}
+        />
+        {allTags.map(tag => (
+          <button
+            key={tag}
+            className={`filter-btn ${tagFilter === tag ? 'active' : ''}`}
+            onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
+          >
+            {tag}
+          </button>
+        ))}
+        <button className="filter-btn" style={{ marginLeft: 'auto' }} onClick={() => setShowForm(s => !s)}>
+          + Add Client
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="card" style={{ marginBottom: '16px' }}>
+          <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '480px' }}>
+            <input required placeholder="Name *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }} />
+            <input required placeholder="Phone * (e.g. +16471234567)" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
+              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }} />
+            <textarea placeholder="Notes (optional)" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px', resize: 'vertical', minHeight: '60px' }} />
+            <input placeholder="Tags (comma-separated, e.g. VIP, regular)" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
+              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }} />
+            {error && <div style={{ color: '#e53e3e', fontSize: '13px' }}>{error}</div>}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="submit" className="filter-btn active" disabled={saving}>{saving ? 'Saving...' : 'Add Client'}</button>
+              <button type="button" className="filter-btn" onClick={() => { setShowForm(false); setError(''); }}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div className="card">
+        {filtered.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">👤</div>
+            <div className="empty-title">No clients yet</div>
+            <div className="empty-sub">Clients are created automatically when bookings come in</div>
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th><th>Phone</th><th>Last Visit</th><th>Visits</th>
+                  <th>Preferred Service</th><th>Preferred Barber</th><th>Tags</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(c => (
+                  <tr key={c.id} style={{ cursor: 'pointer' }}
+                    onClick={() => { window._clientProfileId = c.id; setPage('client-profile'); }}>
+                    <td><div className="cell-name" style={{ color: '#6366f1', textDecoration: 'underline' }}>{c.name}</div></td>
+                    <td>{c.phone || '—'}</td>
+                    <td>{c.last_visit ? new Date(c.last_visit + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
+                    <td>{c.visit_count || 0}</td>
+                    <td>{c.preferred_service || '—'}</td>
+                    <td>{c.preferred_barber || '—'}</td>
+                    <td>{(c.tags || []).join(', ') || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   const [authed, setAuthed]     = useState(false);
   const [page, setPage]         = useState('home');
   const [business, setBusiness] = useState(null);
+  const [clients, setClients]   = useState([]);
 
   useEffect(() => {
     // Pick up token from URL (sent by OAuth callback)
@@ -1325,6 +1453,10 @@ function App() {
       .then(r => r.json())
       .then(data => setBusiness(data.business || data))
       .catch(() => {});
+    apiFetch('/api/clients')
+      .then(r => r.json())
+      .then(d => setClients(d.clients || []))
+      .catch(() => {});
   }, []);
 
   if (!authed) {
@@ -1336,11 +1468,12 @@ function App() {
   }
 
   const titles = {
-    home:        'Dashboard',
-    bookings:    'Bookings',
-    settings:    'Settings',
-    billing:     'Billing',
-    onboarding:  'Setup',
+    home:           'Dashboard',
+    bookings:       'Bookings',
+    clients:        'Clients',
+    settings:       'Settings',
+    billing:        'Billing',
+    onboarding:     'Setup',
   };
 
   return (
@@ -1350,7 +1483,8 @@ function App() {
         <TopBar title={titles[page] || 'Dashboard'} />
         <div className="content-area">
           {page === 'home'       && <DashboardHome />}
-          {page === 'bookings'   && <BookingsPage />}
+          {page === 'bookings'   && <BookingsPage clients={clients} setPage={setPage} />}
+          {page === 'clients'    && <ClientsPage clients={clients} setClients={setClients} setPage={setPage} />}
           {page === 'settings'   && <SettingsPage setPage={setPage} />}
           {page === 'billing'    && <BillingPage />}
           {page === 'onboarding' && <OnboardingPage setPage={setPage} />}
