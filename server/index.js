@@ -1159,6 +1159,48 @@ app.post('/admin/generate-research-report', async (req, res) => {
 
 
 
+
+// ── GET /admin/vapi-assistants ─────────────────────────────────────────────────
+// Lists all Vapi assistants (id + name only).
+app.get('/admin/vapi-assistants', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const axios = require('axios');
+    const { data } = await axios.get('https://api.vapi.ai/assistant?limit=100', {
+      headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}` },
+      timeout: 15000,
+    });
+    const list = Array.isArray(data) ? data : (data.results || data.data || []);
+    return res.json(list.map(a => ({ id: a.id, name: a.name, createdAt: a.createdAt })));
+  } catch (err) {
+    const msg = err.response ? `Vapi ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
+    return res.status(500).json({ error: msg });
+  }
+});
+
+// ── DELETE /admin/vapi-assistants/:id ──────────────────────────────────────────
+// Deletes a specific Vapi assistant by ID.
+app.delete('/admin/vapi-assistants/:id', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const axios = require('axios');
+    await axios.delete(`https://api.vapi.ai/assistant/${req.params.id}`, {
+      headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}` },
+      timeout: 15000,
+    });
+    return res.json({ ok: true, deleted: req.params.id });
+  } catch (err) {
+    const msg = err.response ? `Vapi ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
+    return res.status(500).json({ error: msg });
+  }
+});
+
 // ── POST /admin/clone-vapi-for-sams ───────────────────────────────────────────
 // One-shot: creates a proper cloned Vapi assistant for Sam's Barbershop and
 // updates the businesses table with the new assistant ID.
