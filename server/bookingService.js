@@ -217,6 +217,29 @@ async function findBusiness(phoneNumber, assistantId) {
   return data;
 }
 
+// Upsert a client record for this booking (non-blocking — failure only logs a warning)
+async function upsertClient(business, bookingData) {
+  if (!bookingData.customerPhone || !bookingData.name) return;
+  try {
+    await supabase
+      .from('clients')
+      .upsert(
+        {
+          business_id: business.id,
+          phone: bookingData.customerPhone,
+          name: bookingData.name,  // extractFromToolCall() maps customerName → name
+          updated_at: new Date().toISOString()
+        },
+        {
+          onConflict: 'business_id,phone',
+          ignoreDuplicates: false
+        }
+      );
+  } catch (upsertErr) {
+    console.warn('⚠️  Client upsert failed (non-blocking):', upsertErr.message);
+  }
+}
+
 // Save booking to database
 async function saveBooking(business, bookingData, vapiCallId) {
   const record = {
@@ -255,27 +278,8 @@ async function saveBooking(business, bookingData, vapiCallId) {
         throw retry.error;
       }
       console.log('Booking saved successfully:', retry.data.id);
-  // Upsert client record — fire-and-forget, must never block the booking response
-  if (bookingData.customerPhone && bookingData.name) {
-    try {
-      await supabase
-        .from('clients')
-        .upsert(
-          {
-            business_id: business.id,
-            phone: bookingData.customerPhone,
-            name: bookingData.name,  // extractFromToolCall() maps customerName → name
-            updated_at: new Date().toISOString()
-          },
-          {
-            onConflict: 'business_id,phone',
-            ignoreDuplicates: false
-          }
-        );
-    } catch (upsertErr) {
-      console.warn('⚠️  Client upsert failed (non-blocking):', upsertErr.message);
-    }
-  }
+      // Upsert client record — non-blocking (failure only logs a warning)
+      await upsertClient(business, bookingData);
       return retry.data;
     }
     console.error('Error saving booking:', error);
@@ -283,27 +287,8 @@ async function saveBooking(business, bookingData, vapiCallId) {
   }
 
   console.log('Booking saved successfully:', data.id);
-  // Upsert client record — fire-and-forget, must never block the booking response
-  if (bookingData.customerPhone && bookingData.name) {
-    try {
-      await supabase
-        .from('clients')
-        .upsert(
-          {
-            business_id: business.id,
-            phone: bookingData.customerPhone,
-            name: bookingData.name,  // extractFromToolCall() maps customerName → name
-            updated_at: new Date().toISOString()
-          },
-          {
-            onConflict: 'business_id,phone',
-            ignoreDuplicates: false
-          }
-        );
-    } catch (upsertErr) {
-      console.warn('⚠️  Client upsert failed (non-blocking):', upsertErr.message);
-    }
-  }
+  // Upsert client record — non-blocking (failure only logs a warning)
+  await upsertClient(business, bookingData);
   return data;
 }
 
