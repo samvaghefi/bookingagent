@@ -375,7 +375,7 @@ function computeClientStats(bookings) {
     if (!s.last_visit || b.appointment_date > s.last_visit) {
       s.last_visit = b.appointment_date;
     }
-    const svc = Array.isArray(b.service_ids) ? b.service_ids[0] : b.service_ids;
+    const svc = Array.isArray(b.service_ids) ? b.service_ids[0] : null;
     if (svc) s.services[svc] = (s.services[svc] || 0) + 1;
     if (b.preferred_barber) s.barbers[b.preferred_barber] = (s.barbers[b.preferred_barber] || 0) + 1;
   }
@@ -424,6 +424,9 @@ router.post('/api/clients', async (req, res) => {
   const { name, phone, notes, tags } = req.body;
   if (!name || !phone) {
     return res.status(400).json({ error: 'name and phone are required.' });
+  }
+  if (tags !== undefined && !Array.isArray(tags)) {
+    return res.status(400).json({ error: 'tags must be an array of strings.' });
   }
 
   try {
