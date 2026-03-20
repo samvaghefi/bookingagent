@@ -25,6 +25,7 @@ const stripe = require('stripe')(
     : process.env.STRIPE_SECRET_KEY
 );
 const { createCheckoutSession } = require('./billingService');
+const { handleDepositCheckoutComplete } = require('./depositService');
 const { createBusiness } = require('./signupService');
 const { provisionPhoneNumber, releasePhoneNumber } = require('./twilioProvisioningService');
 const { createVapiAssistant, updateVapiAssistant } = require('./vapiService');
@@ -168,7 +169,14 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
 
   try {
     if (event.type === 'checkout.session.completed') {
-      await handleCheckoutCompleted(event.data.object);
+      const session = event.data.object;
+      if (session.metadata?.booking_id) {
+        // deposit flow — booking_id present, business_id absent
+        await handleDepositCheckoutComplete(session);
+      } else {
+        // billing flow — business_id present, booking_id absent
+        await handleCheckoutCompleted(session);
+      }
     }
 
     else if (event.type === 'customer.subscription.deleted') {
@@ -219,6 +227,63 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
   }
 
   res.json({ received: true });
+});
+
+// ── Deposit routes (public, no auth) ─────────────────────────────────────────
+const jwt = require('jsonwebtoken');
+const depositStripe = require('stripe')(
+  process.env.TEST_MODE === 'true'
+    ? process.env.STRIPE_TEST_SECRET_KEY
+    : process.env.STRIPE_SECRET_KEY
+);
+const BASE_URL_DEPOSIT = process.env.BASE_URL || 'https://bookingagent-gmo2.onrender.com';
+
+app.get('/deposit/success', (req, res) => {
+  res.status(200).send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Deposit Confirmed</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f9fafb}div{text-align:center;max-width:400px;padding:2rem}</style></head><body><div><h2>✅ You're all set!</h2><p>Your spot is secured! We look forward to seeing you.</p></div></body></html>`);
+});
+
+app.get('/deposit/cancel', (req, res) => {
+  res.status(200).send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Deposit Pending</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f9fafb}div{text-align:center;max-width:400px;padding:2rem}</style></head><body><div><h2>No problem!</h2><p>Your link is still valid. Tap the link in your text message to submit your deposit.</p></div></body></html>`);
+});
+
+app.get('/deposit/:token', async (req, res) => {
+  let payload;
+  try {
+    payload = jwt.verify(req.params.token, process.env.JWT_SECRET);
+  } catch (err) {
+    return res.status(400).send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Link Expired</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f9fafb}div{text-align:center;max-width:400px;padding:2rem}</style></head><body><div><h2>Link Expired</h2><p>This link has expired. Please call us to arrange your deposit.</p></div></body></html>`);
+  }
+
+  try {
+    const { data: booking } = await supabase.from('bookings').select('*').eq('id', payload.bookingId).single();
+    if (!booking) return res.status(404).send('Booking not found.');
+    const { data: business } = await supabase.from('businesses').select('*').eq('id', booking.business_id).single();
+    if (!business) return res.status(404).send('Business not found.');
+
+    let customerId = booking.stripe_customer_id;
+    if (!customerId) {
+      const customer = await depositStripe.customers.create({
+        name: booking.customer_name,
+        phone: booking.customer_phone,
+        metadata: { booking_id: booking.id },
+      });
+      customerId = customer.id;
+      await supabase.from('bookings').update({ stripe_customer_id: customerId }).eq('id', booking.id);
+    }
+
+    const checkoutSession = await depositStripe.checkout.sessions.create({
+      mode: 'setup',
+      customer: customerId,
+      metadata: { booking_id: booking.id },
+      success_url: `${BASE_URL_DEPOSIT}/deposit/success`,
+      cancel_url: `${BASE_URL_DEPOSIT}/deposit/cancel`,
+    });
+
+    res.redirect(checkoutSession.url);
+  } catch (err) {
+    console.error('GET /deposit/:token error:', err.message);
+    res.status(500).send('Something went wrong. Please try again or contact us.');
+  }
 });
 
 app.use(express.json());
