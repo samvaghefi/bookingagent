@@ -1157,6 +1157,34 @@ app.post('/admin/generate-research-report', async (req, res) => {
 });
 
 
+
+// ── POST /admin/patch-vapi-voice ───────────────────────────────────────────────
+// One-shot: sets the voiceId on the Vapi template assistant, keeping other voice settings.
+app.post('/admin/patch-vapi-voice', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  try {
+    const axios = require('axios');
+    const TEMPLATE_ID = '3f7183f9-4796-4104-8b08-015a4d675792';
+    const headers = { Authorization: `Bearer ${process.env.VAPI_API_KEY}`, 'Content-Type': 'application/json' };
+
+    // Fetch current voice settings
+    const { data: current } = await axios.get(`https://api.vapi.ai/assistant/${TEMPLATE_ID}`, { headers, timeout: 15000 });
+    const updatedVoice = { ...current.voice, voiceId: (req.body && req.body.voiceId) || 'AZnzlk1XvdvUeBnXmlld' };
+
+    await axios.patch(`https://api.vapi.ai/assistant/${TEMPLATE_ID}`, { voice: updatedVoice }, { headers, timeout: 15000 });
+
+    // Confirm
+    const { data: updated } = await axios.get(`https://api.vapi.ai/assistant/${TEMPLATE_ID}`, { headers, timeout: 15000 });
+    return res.json({ ok: true, voice: updated.voice });
+  } catch (err) {
+    const msg = err.response ? `Vapi ${err.response.status}: ${JSON.stringify(err.response.data)}` : err.message;
+    return res.status(500).json({ error: msg });
+  }
+});
+
 // ── POST /admin/patch-vapi-transcriber ─────────────────────────────────────────
 // One-shot: sets the transcriber on the Vapi template assistant.
 app.post('/admin/patch-vapi-transcriber', async (req, res) => {
