@@ -5,6 +5,7 @@ const { cancelSubscription } = require('./billingService');
 const depositService = require('./depositService');
 const QRCode = require('qrcode');
 const queueService = require('./queueService');
+const { rebuildAndPatchVapiPrompt } = require('./vapiService');
 
 const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://bookingagent-gmo2.onrender.com';
 
@@ -47,6 +48,9 @@ router.get('/api/business', async (req, res) => {
 });
 
 // PUT /api/business — update allowed business fields
+// Fields that require a Vapi system-prompt rebuild when changed:
+const VAPI_PROMPT_FIELDS = new Set(['name', 'address', 'business_hours', 'ai_name', 'barbers', 'deposit_enabled', 'deposit_amount']);
+
 router.put('/api/business', async (req, res) => {
   const allowed = ['name', 'phone', 'address', 'business_hours', 'ai_name', 'business_type', 'timezone', 'barbers', 'deposit_enabled', 'deposit_amount', 'queue_enabled', 'queue_notify_timeout'];
   const updates = {};
@@ -68,6 +72,22 @@ router.put('/api/business', async (req, res) => {
 
     if (error) throw error;
     res.json({ business });
+
+    // Fire-and-forget Vapi prompt rebuild if any Vapi-relevant field changed
+    const needsVapiSync = Object.keys(updates).some(f => VAPI_PROMPT_FIELDS.has(f));
+    if (needsVapiSync) {
+      (async () => {
+        try {
+          const [{ data: fullBiz }, { data: services }] = await Promise.all([
+            supabase.from('businesses').select('*').eq('id', req.business.id).single(),
+            supabase.from('services').select('*').eq('business_id', req.business.id),
+          ]);
+          if (fullBiz) await rebuildAndPatchVapiPrompt(fullBiz, services || []);
+        } catch (vapiErr) {
+          console.error('Vapi prompt sync failed (non-fatal):', vapiErr.message);
+        }
+      })();
+    }
   } catch (err) {
     console.error('PUT /api/business error:', err);
     res.status(500).json({ error: err.message || JSON.stringify(err) });

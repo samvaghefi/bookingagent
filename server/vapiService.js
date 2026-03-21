@@ -56,13 +56,23 @@ function buildSystemPrompt(business, { services = [], businessHours = null } = {
   const langs = Array.isArray(business.supported_languages) ? business.supported_languages : ['en'];
   const tzInfo = getTimezoneInfo(tz);
 
+  // Build deposit policy text (replaces {{depositPolicy}} placeholder)
+  let depositPolicyText = '';
+  if (business.deposit_enabled) {
+    const amountDollars = business.deposit_amount != null
+      ? (business.deposit_amount / 100).toFixed(0)
+      : '25';
+    depositPolicyText = `DEPOSIT POLICY:\nThis business requires a CA$${amountDollars} deposit to hold appointments. After the booking is confirmed, the customer will receive a text message with a secure payment link. Let them know their appointment is not confirmed until the deposit is paid. If asked, the deposit is applied toward their service cost.`;
+  }
+
   let prompt = loadSystemPromptTemplate();
   prompt = prompt
     .replace(/\{\{businessName\}\}/g,     business.name)
     .replace(/\{\{businessLocation\}\}/g, business.address || tzInfo.location)
     .replace(/\{\{timezoneLabel\}\}/g,    tzInfo.label)
     .replace(/\{\{openingHours\}\}/g,     formatBusinessHours(businessHours || business.business_hours || null))
-    .replace(/\{\{services\}\}/g,         formatServices(services));
+    .replace(/\{\{services\}\}/g,         formatServices(services))
+    .replace(/\{\{depositPolicy\}\}/g,    depositPolicyText);
 
   if (!langs.includes('ko')) {
     prompt = prompt
@@ -228,4 +238,50 @@ async function deleteVapiAssistant(assistantId) {
   console.log(`Vapi assistant deleted: ${assistantId}`);
 }
 
-module.exports = { createVapiAssistant, updateVapiAssistant, deleteVapiAssistant, buildSystemPrompt };
+// ── rebuildAndPatchVapiPrompt ─────────────────────────────────────────────────
+// Full prompt rebuild from vapi-system-prompt.txt + current business data.
+// Fetches the live assistant, replaces the system message, and PATCHes Vapi.
+// Returns silently if no vapi_assistant_id — safe to call unconditionally.
+async function rebuildAndPatchVapiPrompt(business, services) {
+  const assistantId = business.vapi_assistant_id;
+  if (!assistantId || !process.env.VAPI_API_KEY) return;
+
+  const systemPrompt = buildSystemPrompt(business, {
+    services: services || [],
+    businessHours: business.business_hours || null,
+  });
+
+  let current;
+  try {
+    const res = await axios.get(
+      `${VAPI_BASE}/assistant/${assistantId}`,
+      { headers: vapiHeaders(), timeout: 15000 }
+    );
+    current = res.data;
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
+
+  const messages = (current.model && current.model.messages) || [];
+  const sysMsgIndex = messages.findIndex(m => m.role === 'system');
+  const updatedMessages = [...messages];
+  if (sysMsgIndex >= 0) {
+    updatedMessages[sysMsgIndex] = { ...messages[sysMsgIndex], content: systemPrompt };
+  } else {
+    updatedMessages.push({ role: 'system', content: systemPrompt });
+  }
+
+  try {
+    await axios.patch(
+      `${VAPI_BASE}/assistant/${assistantId}`,
+      { model: { ...current.model, messages: updatedMessages } },
+      { headers: vapiHeaders(), timeout: 15000 }
+    );
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
+
+  console.log(`Vapi prompt rebuilt for ${business.name} (${assistantId})`);
+}
+
+module.exports = { createVapiAssistant, updateVapiAssistant, deleteVapiAssistant, buildSystemPrompt, rebuildAndPatchVapiPrompt };

@@ -1410,9 +1410,16 @@ app.post('/admin/patch-sams-prompt', async (req, res) => {
       updatedMessages.push({ role: 'system', content: systemPrompt });
     }
 
+    // Build the PATCH payload — system prompt + clear firstMessage to remove any hardcoded AI name
+    const patchPayload = {
+      model: { ...current.model, messages: updatedMessages },
+      // Reset firstMessage to a generic greeting so no AI name is introduced
+      firstMessage: `Hello! Thank you for calling ${biz.name}. How can I help you today?`,
+    };
+
     await axios.patch(
       `https://api.vapi.ai/assistant/${assistantId}`,
-      { model: { ...current.model, messages: updatedMessages } },
+      patchPayload,
       { headers: { Authorization: `Bearer ${process.env.VAPI_API_KEY}`, 'Content-Type': 'application/json' }, timeout: 15000 }
     );
 
@@ -1420,10 +1427,62 @@ app.post('/admin/patch-sams-prompt', async (req, res) => {
       ok: true,
       assistantId,
       promptSnippet: systemPrompt.substring(0, 300),
+      firstMessage: patchPayload.firstMessage,
     });
   } catch (err) {
     console.error('/admin/patch-sams-prompt error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /admin/release-twilio-numbers ─────────────────────────────────────────
+// Verifies numbers are not in the businesses table, then releases them from Twilio.
+app.post('/admin/release-twilio-numbers', async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const { numbers } = req.body; // array of E.164 strings, e.g. ["+14373678615"]
+  if (!Array.isArray(numbers) || numbers.length === 0) {
+    return res.status(400).json({ error: 'numbers must be a non-empty array.' });
+  }
+
+  const results = [];
+  try {
+    const { createClient } = require('@supabase/supabase-js');
+    const twilio = require('twilio');
+    const sbClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+    const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+    for (const num of numbers) {
+      // Safety check: ensure no business is using this number
+      const { data: inUse } = await sbClient
+        .from('businesses')
+        .select('id, name')
+        .eq('twilio_phone', num)
+        .maybeSingle();
+
+      if (inUse) {
+        results.push({ number: num, status: 'skipped', reason: `In use by business "${inUse.name}" (${inUse.id})` });
+        continue;
+      }
+
+      // Look up the Twilio SID for this number and release it
+      const records = await twilioClient.incomingPhoneNumbers.list({ phoneNumber: num, limit: 1 });
+      if (!records.length) {
+        results.push({ number: num, status: 'not_found', reason: 'Number not found in Twilio account' });
+        continue;
+      }
+
+      await twilioClient.incomingPhoneNumbers(records[0].sid).remove();
+      results.push({ number: num, status: 'released', sid: records[0].sid });
+      console.log(`Admin released Twilio number: ${num} (${records[0].sid})`);
+    }
+
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error('/admin/release-twilio-numbers error:', err.message);
+    res.status(500).json({ error: err.message, results });
   }
 });
 

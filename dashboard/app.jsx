@@ -767,7 +767,7 @@ function SettingsPage({ setPage }) {
             <input
               value={business?.ai_name || ''}
               onChange={e => setBusiness(b => ({ ...b, ai_name: e.target.value }))}
-              placeholder="e.g. Sarah"
+              placeholder="e.g. Alex"
             />
           </div>
         </div>
@@ -970,24 +970,17 @@ function SettingsPage({ setPage }) {
             </div>
           </div>
           {business?.deposit_enabled && (
-            <>
-              <div className="form-group">
-                <label>Deposit Amount (CA$)</label>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={business?.deposit_amount_display ?? 25}
-                  onChange={e => setBusiness(b => ({ ...b, deposit_amount_display: parseFloat(e.target.value) || 0 }))}
-                  style={{ width: 120 }}
-                />
-              </div>
-              <div className="form-group full-width">
-                <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#92400e' }}>
-                  Remember to update your Vapi assistant prompt to mention the deposit policy.
-                </div>
-              </div>
-            </>
+            <div className="form-group">
+              <label>Deposit Amount (CA$)</label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={business?.deposit_amount_display ?? 25}
+                onChange={e => setBusiness(b => ({ ...b, deposit_amount_display: parseFloat(e.target.value) || 0 }))}
+                style={{ width: 120 }}
+              />
+            </div>
           )}
         </div>
         <div className="save-row">
@@ -1319,7 +1312,7 @@ function OnboardingPage({ setPage }) {
     name:          '',
     phone:         '',
     address:       '',
-    ai_name:       'Sarah',
+    ai_name:       '',
     business_type: 'Barbershop',
     timezone:      'America/Toronto',
     business_hours: {},
@@ -1352,7 +1345,7 @@ function OnboardingPage({ setPage }) {
           name:           biz.name          || '',
           phone:          biz.phone         || '',
           address:        biz.address       || '',
-          ai_name:        biz.ai_name       || 'Sarah',
+          ai_name:        biz.ai_name       || '',
           business_type:  bizType,
           timezone:       biz.timezone      || 'America/Toronto',
           business_hours: biz.business_hours || {},
@@ -1519,7 +1512,7 @@ function OnboardingPage({ setPage }) {
               <input
                 value={data.ai_name}
                 onChange={e => setField('ai_name', e.target.value)}
-                placeholder="Sarah"
+                placeholder="e.g. Alex"
               />
             </div>
             <div className="form-group">
