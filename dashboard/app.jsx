@@ -572,7 +572,7 @@ function SettingsPage({ setPage }) {
         const biz = b.business || b;
         setBusiness({ ...biz, deposit_amount_display: biz.deposit_amount != null ? biz.deposit_amount / 100 : 25 });
         setServices(s.services || s || []);
-        setBarbers(biz.barbers || []);
+        setBarbers((biz.barbers || []).map(b => typeof b === 'string' ? { name: b, calendarId: '' } : b));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -683,6 +683,55 @@ function SettingsPage({ setPage }) {
 
   return (
     <div className="page-content settings-page">
+
+      {/* ── Your Booking Page ── */}
+      <div className="card">
+        <div className="card-header">Your Booking Page</div>
+        {business.booking_slug ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
+            <span style={{ flex: 1, fontSize: 14, color: '#374151', wordBreak: 'break-all' }}>
+              {window.location.origin}/book/{business.booking_slug}
+            </span>
+            <button
+              onClick={() => navigator.clipboard.writeText(`${window.location.origin}/book/${business.booking_slug}`)}
+              style={{ padding: '6px 12px', background: '#534AB7', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}
+            >Copy link</button>
+            <a href={`/book/${business.booking_slug}`} target="_blank" rel="noopener noreferrer"
+              style={{ padding: '6px 12px', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, textDecoration: 'none', whiteSpace: 'nowrap' }}>
+              Open ↗
+            </a>
+          </div>
+        ) : (
+          <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 14 }}>
+            Set a slug below to activate your public booking page.
+          </p>
+        )}
+        <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Booking page slug</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            type="text"
+            id="slugInput"
+            defaultValue={business.booking_slug || ''}
+            placeholder="e.g. sams-barbershop"
+            style={{ flex: 1, padding: '10px 12px', border: '1.5px solid #e5e7eb', borderRadius: 10, fontSize: 15 }}
+          />
+          <button
+            onClick={async () => {
+              const slug = document.getElementById('slugInput').value.trim().toLowerCase();
+              const res = await fetch('/api/business/slug', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bimbly_token')}` },
+                body: JSON.stringify({ slug }),
+              });
+              const data = await res.json();
+              if (!res.ok) { alert(data.error || 'Failed to save.'); }
+              else { setBusiness(b => ({ ...b, booking_slug: data.business.booking_slug })); }
+            }}
+            style={{ padding: '10px 16px', background: '#534AB7', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+          >Save</button>
+        </div>
+        <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Lowercase letters, numbers, and hyphens only.</p>
+      </div>
 
       {/* ── Business Info ── */}
       <div className="card">
@@ -840,15 +889,24 @@ function SettingsPage({ setPage }) {
           These names are used by your AI receptionist when customers request a specific team member.
         </p>
         <div className="barbers-list">
-          {barbers.map((name, i) => (
-            <div key={i} className="barber-chip">
-              {name}{i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
-              {i !== 0 && (
-                <button
-                  className="chip-remove"
-                  onClick={() => setBarbers(b => b.filter((_, j) => j !== i))}
-                >×</button>
-              )}
+          {barbers.map((barber, i) => (
+            <div key={i} style={{ marginBottom: 10 }}>
+              <div className="barber-chip" style={{ marginBottom: 4 }}>
+                {barber.name}{i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
+                {i !== 0 && (
+                  <button
+                    className="chip-remove"
+                    onClick={() => setBarbers(b => b.filter((_, j) => j !== i))}
+                  >×</button>
+                )}
+              </div>
+              <input
+                type="text"
+                placeholder="Google Calendar ID (optional, e.g. name@gmail.com)"
+                value={barber.calendarId || ''}
+                onChange={e => setBarbers(b => b.map((x, j) => j === i ? { ...x, calendarId: e.target.value } : x))}
+                style={{ fontSize: 12, padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6, width: '100%', color: '#6b7280' }}
+              />
             </div>
           ))}
           {barbers.length === 0 && (
@@ -862,7 +920,7 @@ function SettingsPage({ setPage }) {
             onChange={e => setNewBarber(e.target.value)}
             onKeyDown={e => {
               if (e.key === 'Enter' && newBarber.trim()) {
-                setBarbers(b => [...b, newBarber.trim()]);
+                setBarbers(b => [...b, { name: newBarber.trim(), calendarId: '' }]);
                 setNewBarber('');
               }
             }}
@@ -871,7 +929,7 @@ function SettingsPage({ setPage }) {
             className="btn-outline"
             onClick={() => {
               if (newBarber.trim()) {
-                setBarbers(b => [...b, newBarber.trim()]);
+                setBarbers(b => [...b, { name: newBarber.trim(), calendarId: '' }]);
                 setNewBarber('');
               }
             }}
@@ -1333,7 +1391,7 @@ function OnboardingPage({ setPage }) {
 
   const addBarber = () => {
     if (newBarber.trim()) {
-      setData(d => ({ ...d, barbers: [...d.barbers, newBarber.trim()] }));
+      setData(d => ({ ...d, barbers: [...d.barbers, { name: newBarber.trim(), calendarId: '' }] }));
       setNewBarber('');
     }
   };
@@ -1527,9 +1585,10 @@ function OnboardingPage({ setPage }) {
               {plan === 'starter' && <span style={{ display: 'block', fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Starter plan includes up to 4 team members.</span>}
             </p>
             <div className="barbers-list" style={{ marginBottom: 16 }}>
-              {data.barbers.map((name, i) => (
+              {data.barbers.map((barber, i) => (
                 <div key={i} className="barber-chip">
-                  {name}{i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
+                  {typeof barber === 'string' ? barber : barber.name}
+                  {i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
                   {/* Prevent removing the owner (index 0) */}
                   {i > 0 && (
                     <button
