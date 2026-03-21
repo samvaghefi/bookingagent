@@ -152,13 +152,18 @@ function renderServices(services) {
     return;
   }
   list.innerHTML = services.map(s => `
-    <div class="service-card" onclick='selectService(${JSON.stringify(s)})' data-id="${s.id}">
+    <div class="service-card" onclick="selectServiceById('${s.id}')" data-id="${s.id}">
       <div>
         <div class="service-card-name">${s.name}</div>
         <div class="service-card-meta">${s.duration_minutes || 60} min</div>
       </div>
-      <div class="service-card-price">${s.price ? '$' + Math.round(s.price / 100) : ''}</div>
+      <div class="service-card-price">${s.price ? '$' + s.price : ''}</div>
     </div>`).join('');
+}
+
+function selectServiceById(id) {
+  const s = state.info?.services?.find(svc => svc.id === id);
+  if (s) selectService(s);
 }
 
 function selectService(s) {
