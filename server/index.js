@@ -35,6 +35,7 @@ const dashboardRoutes = require('./dashboardRoutes');
 const authRoutes = require('./authRoutes');
 const intelRoutes = require('./intelRoutes');
 const queueService = require('./queueService');
+const bookingPageRoutes = require('./bookingPageRoutes');
 
 const app = express();
 
@@ -299,6 +300,7 @@ app.use(session({
 app.use(authRoutes);
 app.use(dashboardRoutes);
 app.use(intelRoutes);
+app.use(bookingPageRoutes);
 
 // ── Dashboard SPA ─────────────────────────────────────────────────────────────
 // Serve dashboard static files (JS, CSS) under /dashboard/
