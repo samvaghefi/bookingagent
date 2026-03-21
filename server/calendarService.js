@@ -164,8 +164,53 @@ Booked via BookingAgent
   }
 }
 
+// Returns array of { start: Date, end: Date } busy intervals for a calendarId on a given date.
+// Fails open — returns [] on any error so booking availability still works without a calendar.
+async function getFreeBusy(business, calendarId, date, timezone) {
+  if (!business.google_access_token || !business.google_refresh_token) return [];
+
+  try {
+    const oauth2Client = getOAuthClient();
+    oauth2Client.setCredentials({
+      access_token:  business.google_access_token,
+      refresh_token: business.google_refresh_token,
+    });
+
+    oauth2Client.on('tokens', async (tokens) => {
+      await supabase.from('businesses').update({
+        google_access_token: tokens.access_token,
+        ...(tokens.refresh_token ? { google_refresh_token: tokens.refresh_token } : {}),
+        google_token_expiry: tokens.expiry_date
+          ? new Date(tokens.expiry_date).toISOString() : null,
+      }).eq('id', business.id);
+    });
+
+    await oauth2Client.getAccessToken();
+
+    const tz       = timezone || 'America/Toronto';
+    const dayStart = DateTime.fromISO(date, { zone: tz }).startOf('day');
+    const dayEnd   = dayStart.endOf('day');
+
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+    const response = await calendar.freebusy.query({
+      requestBody: {
+        timeMin: dayStart.toISO(),
+        timeMax: dayEnd.toISO(),
+        items:   [{ id: calendarId }],
+      },
+    });
+
+    const busy = response.data.calendars?.[calendarId]?.busy || [];
+    return busy.map(b => ({ start: new Date(b.start), end: new Date(b.end) }));
+  } catch (err) {
+    console.warn(`⚠️  getFreeBusy failed for calendar ${calendarId}:`, err.message);
+    return [];
+  }
+}
+
 module.exports = {
   getAuthUrl,
   getTokensFromCode,
-  createCalendarEvent
+  createCalendarEvent,
+  getFreeBusy,
 };
