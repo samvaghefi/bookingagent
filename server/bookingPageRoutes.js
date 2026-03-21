@@ -189,6 +189,27 @@ router.post('/api/book/:businessId', async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields.' });
   }
 
+  // Validate field formats
+  if (typeof customerName !== 'string' || customerName.trim().length < 1 || customerName.trim().length > 100) {
+    return res.status(400).json({ error: 'Invalid customer name.' });
+  }
+  if (!/^\+?[\d\s\-().]{7,20}$/.test(customerPhone)) {
+    return res.status(400).json({ error: 'Invalid phone number.' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)) {
+    return res.status(400).json({ error: 'Invalid date format (YYYY-MM-DD).' });
+  }
+  if (!/^\d{2}:\d{2}$/.test(appointmentTime)) {
+    return res.status(400).json({ error: 'Invalid time format (HH:MM).' });
+  }
+  if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) {
+    return res.status(400).json({ error: 'Invalid email address.' });
+  }
+  const safeDuration = parseInt(duration_minutes);
+  if (duration_minutes !== undefined && (isNaN(safeDuration) || safeDuration < 5 || safeDuration > 480)) {
+    return res.status(400).json({ error: 'Invalid duration.' });
+  }
+
   try {
     const { data: business, error } = await supabase
       .from('businesses')

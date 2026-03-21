@@ -51,17 +51,8 @@ router.get('/intel/login', (req, res) => {
 // ── POST /intel/login ─────────────────────────────────────────────────────────
 router.post('/intel/login', (req, res) => {
   const { username, password } = req.body || {};
-  console.log('DEBUG LOGIN:', {
-    envUser: (process.env.INTEL_USERNAME || '').trim().substring(0, 6),
-    envPass: (process.env.INTEL_PASSWORD || '').trim().substring(0, 6),
-    envPassLength: (process.env.INTEL_PASSWORD || '').trim().length,
-    submittedUser: (username || '').trim().substring(0, 6),
-    submittedPass: (password || '').trim().substring(0, 6),
-    submittedPassLength: (password || '').trim().length,
-    match: username.trim() === (process.env.INTEL_USERNAME || '').trim() &&
-           password.trim() === (process.env.INTEL_PASSWORD || '').trim(),
-  });
   if (
+    username && password &&
     username === process.env.INTEL_USERNAME &&
     password === process.env.INTEL_PASSWORD
   ) {

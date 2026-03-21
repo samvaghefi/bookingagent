@@ -206,11 +206,25 @@ if (!specialRequests) {
 
 // Find business by phone number or assistant ID
 async function findBusiness(phoneNumber, assistantId) {
-  const { data, error } = await supabase
-    .from('businesses')
-    .select('*')
-    .or(`twilio_phone_number.eq.${phoneNumber},vapi_assistant_id.eq.${assistantId}`)
-    .single();
+  // Validate inputs before interpolating into PostgREST filter string
+  const safePhone = (typeof phoneNumber === 'string' && /^\+?[\d\s\-().]{7,20}$/.test(phoneNumber.trim()))
+    ? phoneNumber.trim() : null;
+  const safeAssistantId = (typeof assistantId === 'string' && /^[a-zA-Z0-9_\-]{5,60}$/.test(assistantId.trim()))
+    ? assistantId.trim() : null;
+
+  if (!safePhone && !safeAssistantId) return null;
+
+  // Use separate .eq() queries when only one value is safe, or .or() when both are validated
+  let query = supabase.from('businesses').select('*');
+  if (safePhone && safeAssistantId) {
+    query = query.or(`twilio_phone_number.eq.${safePhone},vapi_assistant_id.eq.${safeAssistantId}`);
+  } else if (safePhone) {
+    query = query.eq('twilio_phone_number', safePhone);
+  } else {
+    query = query.eq('vapi_assistant_id', safeAssistantId);
+  }
+
+  const { data, error } = await query.single();
   
   if (error) {
     console.error('Error finding business:', error);

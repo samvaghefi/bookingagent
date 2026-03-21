@@ -4,7 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test tests/phase1.test.js"
+    "test": "jest --runInBand",
+    "test:unit": "jest tests/unit --runInBand",
+    "test:routes": "jest tests/routes --runInBand",
+    "test:security": "jest tests/security --runInBand",
+    "test:legacy": "node --test tests/phase1.test.js",
+    "test:coverage": "jest --coverage --runInBand"
   },
   "keywords": [],
   "author": "",
@@ -16,6 +21,8 @@
   "dependencies": {
     "@sendgrid/mail": "^8.1.6",
     "@supabase/supabase-js": "^2.97.0",
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
@@ -24,12 +31,14 @@
     "googleapis": "^171.4.0",
     "jsonwebtoken": "^9.0.3",
     "luxon": "^3.7.2",
-    "stripe": "^20.4.1",
-    "twilio": "^5.12.2",
-    "axios": "^1.7.9",
-    "cheerio": "^1.0.0",
-    "rss-parser": "^3.13.0",
     "puppeteer": "^22.0.0",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "rss-parser": "^3.13.0",
+    "stripe": "^20.4.1",
+    "twilio": "^5.12.2"
+  },
+  "devDependencies": {
+    "jest": "^30.3.0",
+    "supertest": "^7.2.2"
   }
 }

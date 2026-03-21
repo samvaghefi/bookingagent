@@ -295,7 +295,7 @@ app.use(session({
   secret: process.env.INTEL_SESSION_SECRET || 'changeme-set-INTEL_SESSION_SECRET',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000, httpOnly: true, secure: false },
+  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000, httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' },
 }));
 app.use(authRoutes);
 app.use(bookingPageRoutes);
@@ -442,77 +442,8 @@ app.post('/webhook/booking', async (req, res) => {
   }
 });
 
-// API endpoint to get all businesses
-app.get('/api/businesses', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('businesses')
-      .select('id, name, email, phone, is_active')
-      .order('created_at', { ascending: false });
-    
-    if (error) throw error;
-    
-    res.json({ businesses: data });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// API endpoint to get bookings for a business
-app.get('/api/businesses/:businessId/bookings', async (req, res) => {
-  try {
-    const { businessId } = req.params;
-    
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('*')
-      .eq('business_id', businessId)
-      .order('appointment_date', { ascending: true });
-    
-    if (error) throw error;
-    
-    res.json({ bookings: data });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// API endpoint to create a new business
-app.post('/api/businesses', async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('businesses')
-      .insert(req.body)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    
-    res.status(201).json({ business: data });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// API endpoint to update a business
-app.patch('/api/businesses/:businessId', async (req, res) => {
-  try {
-    const { businessId } = req.params;
-    
-    const { data, error } = await supabase
-      .from('businesses')
-      .update(req.body)
-      .eq('id', businessId)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    
-    res.json({ business: data });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+// Legacy /api/businesses routes removed — unauthenticated, unused by any frontend.
+// Business CRUD is handled by authenticated endpoints in dashboardRoutes.js.
 
 
 // Route to initiate Google Calendar connection (legacy — kept for compatibility)
