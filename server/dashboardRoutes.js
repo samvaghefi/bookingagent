@@ -32,7 +32,8 @@ router.get('/api/business', async (req, res) => {
         'stripe_subscription_id', 'is_active', 'created_at', 'call_recording_enabled', 'supported_languages',
         'twilio_phone', 'timezone', 'barbers', 'plan',
         'deposit_enabled', 'deposit_amount',
-        'queue_enabled', 'queue_notify_timeout'
+        'queue_enabled', 'queue_notify_timeout',
+        'booking_slug'
       ].join(', '))
       .eq('id', req.business.id)
       .single();
@@ -609,6 +610,40 @@ router.post('/api/billing/cancel', async (req, res) => {
     res.json({ success: true, message: 'Subscription will cancel at the end of the current billing period.' });
   } catch (err) {
     console.error('POST /api/billing/cancel error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Booking Page Slug ─────────────────────────────────────────────────────────
+
+// PUT /api/business/slug — update the booking page slug
+router.put('/api/business/slug', async (req, res) => {
+  const { slug } = req.body;
+  if (!slug) return res.status(400).json({ error: 'Slug is required.' });
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    return res.status(400).json({ error: 'Invalid slug format. Use lowercase letters, numbers, and hyphens only.' });
+  }
+  try {
+    const { data: existing } = await supabase
+      .from('businesses')
+      .select('id')
+      .eq('booking_slug', slug)
+      .neq('id', req.business.id)
+      .maybeSingle();
+
+    if (existing) return res.status(409).json({ error: 'Slug already taken. Please choose another.' });
+
+    const { data: business, error } = await supabase
+      .from('businesses')
+      .update({ booking_slug: slug })
+      .eq('id', req.business.id)
+      .select('id, booking_slug')
+      .single();
+
+    if (error) throw error;
+    res.json({ business });
+  } catch (err) {
+    console.error('PUT /api/business/slug error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
