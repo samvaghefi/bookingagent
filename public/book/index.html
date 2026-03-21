@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Book an Appointment</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 24px 16px; color: #111827; }
+    .card { background: #fff; border-radius: 16px; padding: 32px 28px; max-width: 520px; width: 100%; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+    .biz-name { font-size: 13px; color: #6b7280; text-align: center; margin-bottom: 4px; }
+    h2 { font-size: 20px; font-weight: 700; color: #111827; text-align: center; margin-bottom: 20px; }
+    .progress { display: flex; gap: 6px; margin-bottom: 24px; }
+    .step-dot { flex: 1; height: 4px; border-radius: 2px; background: #e5e7eb; transition: background 0.2s; }
+    .step-dot.active { background: #534AB7; }
+    /* Service cards */
+    .service-list { display: flex; flex-direction: column; gap: 10px; }
+    .service-card { border: 2px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; transition: border-color 0.15s; }
+    .service-card:hover { border-color: #534AB7; }
+    .service-card.selected { border-color: #534AB7; background: #f5f4ff; }
+    .service-card-name { font-size: 15px; font-weight: 600; }
+    .service-card-meta { font-size: 13px; color: #6b7280; margin-top: 2px; }
+    .service-card-price { font-size: 16px; font-weight: 700; color: #534AB7; white-space: nowrap; }
+    /* Date + slots */
+    input[type="date"] { width: 100%; padding: 10px 12px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 15px; color: #111827; background: #fff; margin-bottom: 4px; }
+    input[type="date"]:focus { outline: none; border-color: #534AB7; }
+    .slot-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+    .slot-btn { padding: 9px 4px; border: 1.5px solid #e5e7eb; border-radius: 8px; font-size: 13px; font-weight: 600; color: #374151; background: #fff; cursor: pointer; text-align: center; transition: border-color 0.1s; }
+    .slot-btn:hover:not(.unavailable) { border-color: #534AB7; color: #534AB7; }
+    .slot-btn.selected { border-color: #534AB7; background: #534AB7; color: #fff; }
+    .slot-btn.unavailable { color: #d1d5db; cursor: default; border-color: #f3f4f6; background: #f9fafb; }
+    .msg { text-align: center; padding: 16px 0; font-size: 14px; color: #6b7280; }
+    .msg.err { color: #ef4444; font-weight: 600; }
+    /* Form fields */
+    .field { margin-bottom: 14px; }
+    .field label { display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 4px; }
+    .field input, .field select, .field textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #e5e7eb; border-radius: 10px; font-size: 15px; color: #111827; background: #fff; }
+    .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #534AB7; }
+    .field textarea { resize: vertical; }
+    /* Buttons */
+    .btn-primary { width: 100%; padding: 13px; background: #534AB7; color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: 700; cursor: pointer; margin-top: 18px; transition: background 0.15s; }
+    .btn-primary:hover:not(:disabled) { background: #4338ca; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-back { background: none; border: none; color: #6b7280; font-size: 14px; cursor: pointer; margin-top: 10px; display: block; text-align: center; width: 100%; }
+    .btn-back:hover { color: #374151; }
+    /* Confirm summary */
+    .summary { background: #f8fafc; border-radius: 12px; padding: 16px 18px; font-size: 14px; line-height: 2; margin-bottom: 16px; }
+    /* Banners */
+    .warn-banner { background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; border-radius: 8px; padding: 10px 14px; font-size: 14px; margin-bottom: 12px; }
+    .err-banner  { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c;  border-radius: 8px; padding: 10px 14px; font-size: 14px; margin-bottom: 12px; }
+    /* Step panels */
+    .step { display: none; }
+    .step.active { display: block; }
+    @media (max-width: 400px) { .slot-grid { grid-template-columns: repeat(3, 1fr); } }
+  </style>
+</head>
+<body>
+<div class="card">
+  <p class="biz-name" id="bizName"></p>
+  <div class="progress">
+    <div class="step-dot active" id="d1"></div>
+    <div class="step-dot" id="d2"></div>
+    <div class="step-dot" id="d3"></div>
+    <div class="step-dot" id="d4"></div>
+  </div>
+
+  <!-- Step 1: Service -->
+  <div class="step active" id="step1">
+    <h2>Choose a service</h2>
+    <div class="service-list" id="serviceList"><p class="msg">Loading services…</p></div>
+    <button class="btn-primary" id="s1Next" disabled onclick="goTo(2)">Next →</button>
+  </div>
+
+  <!-- Step 2: Date + Time -->
+  <div class="step" id="step2">
+    <h2>Pick a date &amp; time</h2>
+    <input type="date" id="dateInput" min="">
+    <div id="slotContainer"><p class="msg">Select a date to see available times.</p></div>
+    <button class="btn-primary" id="s2Next" disabled onclick="goTo(3)">Next →</button>
+    <button class="btn-back" onclick="goTo(1)">← Back</button>
+  </div>
+
+  <!-- Step 3: Contact -->
+  <div class="step" id="step3">
+    <h2>Your details</h2>
+    <div id="slotWarning" class="warn-banner" style="display:none"></div>
+    <div class="field"><label>Name *</label><input type="text" id="custName" placeholder="Your name" autocomplete="name"></div>
+    <div class="field"><label>Phone *</label><input type="tel" id="custPhone" placeholder="+1 (416) 555-0000" autocomplete="tel"></div>
+    <div class="field"><label>Email (optional)</label><input type="email" id="custEmail" placeholder="you@example.com" autocomplete="email"></div>
+    <div class="field" id="barberFieldWrap">
+      <label>Preferred team member (optional)</label>
+      <select id="barberSelect"><option value="">No preference</option></select>
+    </div>
+    <div class="field"><label>Special requests (optional)</label><textarea id="custRequests" rows="3" placeholder="e.g. Leave the beard, short on sides"></textarea></div>
+    <button class="btn-primary" onclick="prepareConfirm()">Review booking →</button>
+    <button class="btn-back" onclick="goTo(2)">← Back</button>
+  </div>
+
+  <!-- Step 4: Confirm -->
+  <div class="step" id="step4">
+    <h2>Confirm your booking</h2>
+    <div class="summary" id="confirmSummary"></div>
+    <div id="errMsg" class="err-banner" style="display:none"></div>
+    <button class="btn-primary" id="confirmBtn" onclick="submitBooking()">Confirm Booking</button>
+    <button class="btn-back" onclick="goTo(3)">← Back</button>
+  </div>
+
+  <!-- Success -->
+  <div class="step" id="step5">
+    <div style="text-align:center;padding:16px 0;">
+      <div style="font-size:48px;margin-bottom:12px;">✅</div>
+      <h2 style="margin-bottom:8px;">You're booked!</h2>
+      <p style="color:#6b7280;font-size:14px;line-height:1.6;" id="successMsg"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+const cfg        = window.__BOOKING_CONFIG__ || {};
+const businessId = cfg.businessId;
+
+const state = {
+  service: null, date: null, time: null, barberName: null, info: null,
+  customerName: '', customerPhone: '', customerEmail: '', specialRequests: '',
+};
+
+document.getElementById('bizName').textContent = cfg.businessName || '';
+document.getElementById('dateInput').min = new Date().toISOString().split('T')[0];
+
+fetch(`/api/book/${businessId}/info`)
+  .then(r => r.json())
+  .then(data => { state.info = data; renderServices(data.services); })
+  .catch(() => {
+    document.getElementById('serviceList').innerHTML = '<p class="msg err">Failed to load. Please refresh.</p>';
+  });
+
+// ── Step management ────────────────────────────────────────────────────────────
+function goTo(n) {
+  if (n === 3) populateBarbers();
+  [1, 2, 3, 4, 5].forEach(i => {
+    document.getElementById('step' + i).classList.toggle('active', i === n);
+    const dot = document.getElementById('d' + i);
+    if (dot) dot.classList.toggle('active', i <= n);
+  });
+}
+
+// ── Step 1: Services ──────────────────────────────────────────────────────────
+function renderServices(services) {
+  const list = document.getElementById('serviceList');
+  if (!services || !services.length) {
+    list.innerHTML = '<p class="msg">No services available.</p>';
+    return;
+  }
+  list.innerHTML = services.map(s => `
+    <div class="service-card" onclick='selectService(${JSON.stringify(s)})' data-id="${s.id}">
+      <div>
+        <div class="service-card-name">${s.name}</div>
+        <div class="service-card-meta">${s.duration_minutes || 60} min</div>
+      </div>
+      <div class="service-card-price">${s.price ? '$' + Math.round(s.price / 100) : ''}</div>
+    </div>`).join('');
+}
+
+function selectService(s) {
+  state.service = s;
+  state.time = null;
+  document.querySelectorAll('.service-card').forEach(el =>
+    el.classList.toggle('selected', el.dataset.id === String(s.id))
+  );
+  document.getElementById('s1Next').disabled = false;
+}
+
+// ── Step 2: Date + Slots ──────────────────────────────────────────────────────
+document.getElementById('dateInput').addEventListener('change', function () {
+  state.date = this.value;
+  state.time = null;
+  document.getElementById('s2Next').disabled = true;
+  if (state.date) loadSlots();
+});
+
+function loadSlots() {
+  document.getElementById('slotContainer').innerHTML = '<p class="msg">Checking availability…</p>';
+  const params = new URLSearchParams({ date: state.date, duration: state.service?.duration_minutes || 60 });
+  if (state.barberName) params.append('barberName', state.barberName);
+  fetch(`/api/book/${businessId}/availability?${params}`)
+    .then(r => r.json())
+    .then(renderSlots)
+    .catch(() => {
+      document.getElementById('slotContainer').innerHTML = '<p class="msg err">Failed to load slots. Try again.</p>';
+    });
+}
+
+function renderSlots(data) {
+  const c = document.getElementById('slotContainer');
+  if (data.closed) { c.innerHTML = '<p class="msg err">Closed on this day.</p>'; return; }
+  if (!data.slots?.length) { c.innerHTML = '<p class="msg">No available times on this day.</p>'; return; }
+  c.innerHTML = '<div class="slot-grid">' + data.slots.map(s =>
+    `<button class="slot-btn${s.available ? '' : ' unavailable'}"
+      ${s.available ? `onclick="selectSlot('${s.time}',this)"` : 'disabled'}>
+      ${fmt(s.time)}</button>`).join('') + '</div>';
+}
+
+function selectSlot(time, btn) {
+  state.time = time;
+  document.querySelectorAll('.slot-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  document.getElementById('s2Next').disabled = false;
+}
+
+function fmt(t) {
+  const [h, m] = t.split(':').map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+
+// ── Step 3: Contact + barber ──────────────────────────────────────────────────
+function populateBarbers() {
+  const sel     = document.getElementById('barberSelect');
+  const barbers = state.info?.business?.barbers || [];
+  while (sel.options.length > 1) sel.remove(1);
+  barbers.forEach(b => sel.appendChild(new Option(b.name, b.name)));
+  document.getElementById('barberFieldWrap').style.display = barbers.length ? '' : 'none';
+}
+
+document.addEventListener('change', function (e) {
+  if (e.target.id !== 'barberSelect') return;
+  const nb = e.target.value || null;
+  if (nb === state.barberName) return;
+  state.barberName = nb;
+  if (!state.date || !state.time) return;
+  // Re-check if the chosen slot is still available for the new barber
+  const params = new URLSearchParams({ date: state.date, duration: state.service?.duration_minutes || 60 });
+  if (state.barberName) params.append('barberName', state.barberName);
+  fetch(`/api/book/${businessId}/availability?${params}`)
+    .then(r => r.json())
+    .then(data => {
+      const chosen = data.slots?.find(s => s.time === state.time);
+      if (chosen && !chosen.available) {
+        state.time = null;
+        const warn = document.getElementById('slotWarning');
+        warn.textContent = `Your selected time is no longer available${state.barberName ? ' for ' + state.barberName : ''}. Please pick a new time.`;
+        warn.style.display = 'block';
+        goTo(2);
+        loadSlots();
+      } else {
+        document.getElementById('slotWarning').style.display = 'none';
+      }
+    })
+    .catch(() => {});
+});
+
+function prepareConfirm() {
+  const name  = document.getElementById('custName').value.trim();
+  const phone = document.getElementById('custPhone').value.trim();
+  if (!name || !phone) { alert('Name and phone are required.'); return; }
+  state.customerName    = name;
+  state.customerPhone   = phone;
+  state.customerEmail   = document.getElementById('custEmail').value.trim();
+  state.barberName      = document.getElementById('barberSelect').value || null;
+  state.specialRequests = document.getElementById('custRequests').value.trim();
+  document.getElementById('confirmSummary').innerHTML = [
+    ['Service',     state.service?.name],
+    ['Date',        state.date],
+    ['Time',        fmt(state.time)],
+    state.barberName      ? ['Team member', state.barberName]      : null,
+    ['Name',        state.customerName],
+    ['Phone',       state.customerPhone],
+    state.specialRequests ? ['Requests',    state.specialRequests] : null,
+  ].filter(Boolean).map(([k, v]) => `<div><strong>${k}:</strong> ${v}</div>`).join('');
+  goTo(4);
+}
+
+// ── Step 4: Submit ────────────────────────────────────────────────────────────
+async function submitBooking() {
+  const btn = document.getElementById('confirmBtn');
+  const err = document.getElementById('errMsg');
+  btn.disabled = true;
+  btn.textContent = 'Confirming…';
+  err.style.display = 'none';
+  try {
+    const res = await fetch(`/api/book/${businessId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerName:    state.customerName,
+        customerPhone:   state.customerPhone,
+        customerEmail:   state.customerEmail || null,
+        service:         state.service?.name,
+        appointmentDate: state.date,
+        appointmentTime: state.time,
+        preferredBarber: state.barberName || null,
+        specialRequests: state.specialRequests || null,
+        duration_minutes: state.service?.duration_minutes || 60,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+    if (data.deposit_required && data.deposit_url) {
+      window.location.href = data.deposit_url;
+      return;
+    }
+    document.getElementById('successMsg').textContent =
+      `Your ${state.service?.name} is booked for ${state.date} at ${fmt(state.time)}. You'll receive a confirmation text shortly.`;
+    goTo(5);
+  } catch (e) {
+    err.textContent = e.message;
+    err.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Confirm Booking';
+  }
+}
+</script>
+</body>
+</html>
