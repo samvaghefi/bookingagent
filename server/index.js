@@ -298,9 +298,9 @@ app.use(session({
   cookie: { maxAge: 7 * 24 * 60 * 60 * 1000, httpOnly: true, secure: false },
 }));
 app.use(authRoutes);
+app.use(bookingPageRoutes);
 app.use(dashboardRoutes);
 app.use(intelRoutes);
-app.use(bookingPageRoutes);
 
 // ── Dashboard SPA ─────────────────────────────────────────────────────────────
 // Serve dashboard static files (JS, CSS) under /dashboard/
