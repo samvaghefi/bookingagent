@@ -67,7 +67,12 @@
   <!-- Step 1: Service -->
   <div class="step active" id="step1">
     <h2>Choose a service</h2>
+    <p style="font-size:13px;color:#6b7280;text-align:center;margin-bottom:12px;">Select one or more</p>
     <div class="service-list" id="serviceList"><p class="msg">Loading services…</p></div>
+    <div id="selectionSummary" style="display:none;background:#f5f4ff;border-radius:10px;padding:10px 14px;font-size:14px;margin-top:12px;display:flex;justify-content:space-between;">
+      <span id="selSvcNames"></span>
+      <span style="font-weight:700;color:#534AB7;" id="selTotal"></span>
+    </div>
     <button class="btn-primary" id="s1Next" disabled onclick="goTo(2)">Next →</button>
   </div>
 
@@ -120,7 +125,7 @@ const cfg        = window.__BOOKING_CONFIG__ || {};
 const businessId = cfg.businessId;
 
 const state = {
-  service: null, date: null, time: null, barberName: null, info: null,
+  services: [], date: null, time: null, barberName: null, info: null,
   customerName: '', customerPhone: '', customerEmail: '', specialRequests: '',
 };
 
@@ -163,16 +168,28 @@ function renderServices(services) {
 
 function selectServiceById(id) {
   const s = state.info?.services?.find(svc => svc.id === id);
-  if (s) selectService(s);
-}
-
-function selectService(s) {
-  state.service = s;
+  if (!s) return;
+  const idx = state.services.findIndex(x => x.id === id);
+  if (idx >= 0) {
+    state.services.splice(idx, 1);
+  } else {
+    state.services.push(s);
+  }
   state.time = null;
   document.querySelectorAll('.service-card').forEach(el =>
-    el.classList.toggle('selected', el.dataset.id === String(s.id))
+    el.classList.toggle('selected', state.services.some(x => x.id === el.dataset.id))
   );
-  document.getElementById('s1Next').disabled = false;
+  const total = state.services.reduce((sum, x) => sum + (x.duration_minutes || 60), 0);
+  const price = state.services.reduce((sum, x) => sum + (x.price || 0), 0);
+  const summary = document.getElementById('selectionSummary');
+  if (state.services.length > 0) {
+    summary.style.display = 'flex';
+    document.getElementById('selSvcNames').textContent = state.services.map(x => x.name).join(' + ');
+    document.getElementById('selTotal').textContent = `$${price} · ${total} min`;
+  } else {
+    summary.style.display = 'none';
+  }
+  document.getElementById('s1Next').disabled = state.services.length === 0;
 }
 
 // ── Step 2: Date + Slots ──────────────────────────────────────────────────────
@@ -185,7 +202,8 @@ document.getElementById('dateInput').addEventListener('change', function () {
 
 function loadSlots() {
   document.getElementById('slotContainer').innerHTML = '<p class="msg">Checking availability…</p>';
-  const params = new URLSearchParams({ date: state.date, duration: state.service?.duration_minutes || 60 });
+  const totalDuration = state.services.reduce((sum, s) => sum + (s.duration_minutes || 60), 0) || 60;
+  const params = new URLSearchParams({ date: state.date, duration: totalDuration });
   if (state.barberName) params.append('barberName', state.barberName);
   fetch(`/api/book/${businessId}/availability?${params}`)
     .then(r => r.json())
@@ -233,7 +251,8 @@ document.addEventListener('change', function (e) {
   state.barberName = nb;
   if (!state.date || !state.time) return;
   // Re-check if the chosen slot is still available for the new barber
-  const params = new URLSearchParams({ date: state.date, duration: state.service?.duration_minutes || 60 });
+  const totalDuration = state.services.reduce((sum, s) => sum + (s.duration_minutes || 60), 0) || 60;
+  const params = new URLSearchParams({ date: state.date, duration: totalDuration });
   if (state.barberName) params.append('barberName', state.barberName);
   fetch(`/api/book/${businessId}/availability?${params}`)
     .then(r => r.json())
@@ -262,8 +281,12 @@ function prepareConfirm() {
   state.customerEmail   = document.getElementById('custEmail').value.trim();
   state.barberName      = document.getElementById('barberSelect').value || null;
   state.specialRequests = document.getElementById('custRequests').value.trim();
+  const totalPrice    = state.services.reduce((sum, s) => sum + (s.price || 0), 0);
+  const totalDuration = state.services.reduce((sum, s) => sum + (s.duration_minutes || 60), 0);
+  const svcLabel      = state.services.map(s => s.name).join(' + ');
   document.getElementById('confirmSummary').innerHTML = [
-    ['Service',     state.service?.name],
+    ['Service',     svcLabel + (totalPrice ? ` — $${totalPrice}` : '')],
+    ['Duration',    totalDuration + ' min'],
     ['Date',        state.date],
     ['Time',        fmt(state.time)],
     state.barberName      ? ['Team member', state.barberName]      : null,
@@ -289,12 +312,12 @@ async function submitBooking() {
         customerName:    state.customerName,
         customerPhone:   state.customerPhone,
         customerEmail:   state.customerEmail || null,
-        service:         state.service?.name,
+        service:         state.services.map(s => s.name).join(' + '),
         appointmentDate: state.date,
         appointmentTime: state.time,
         preferredBarber: state.barberName || null,
         specialRequests: state.specialRequests || null,
-        duration_minutes: state.service?.duration_minutes || 60,
+        duration_minutes: state.services.reduce((sum, s) => sum + (s.duration_minutes || 60), 0) || 60,
       }),
     });
     const data = await res.json();
@@ -304,7 +327,7 @@ async function submitBooking() {
       return;
     }
     document.getElementById('successMsg').textContent =
-      `Your ${state.service?.name} is booked for ${state.date} at ${fmt(state.time)}. You'll receive a confirmation text shortly.`;
+      `Your ${state.services.map(s => s.name).join(' + ')} is booked for ${state.date} at ${fmt(state.time)}. You'll receive a confirmation text shortly.`;
     goTo(5);
   } catch (e) {
     err.textContent = e.message;

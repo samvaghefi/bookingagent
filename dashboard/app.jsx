@@ -582,13 +582,17 @@ function SettingsPage({ setPage }) {
     setSaving(true);
     setSaveMsg('');
     try {
+      const normalizedHours = {};
+      DAYS.forEach(day => {
+        normalizedHours[day] = business.business_hours?.[day] || { open: '09:00', close: '18:00', closed: false };
+      });
       await apiFetch('/api/business', {
         method: 'PUT',
         body: JSON.stringify({
           name:           business.name,
           phone:          business.phone,
           address:        business.address,
-          business_hours: business.business_hours,
+          business_hours: normalizedHours,
           ai_name:        business.ai_name,
           barbers,
         }),
