@@ -5,6 +5,29 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
+function generateSlug(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+}
+
+async function findUniqueSlug(baseName) {
+  const base = generateSlug(baseName);
+  let candidate = base;
+  let suffix = 2;
+  while (true) {
+    const { data } = await supabase
+      .from('businesses')
+      .select('id')
+      .eq('booking_slug', candidate)
+      .maybeSingle();
+    if (!data) return candidate;
+    candidate = `${base}-${suffix++}`;
+  }
+}
+
 // Supabase migration (run once in SQL editor):
 // ALTER TABLE businesses ADD COLUMN IF NOT EXISTS city text;
 // ALTER TABLE businesses ADD COLUMN IF NOT EXISTS province text;
@@ -58,8 +81,12 @@ async function createBusiness(data) {
 
   if (error) throw error;
 
-  console.log(`🏪 New business created: ${business.name} | ${business.city || 'no city'}, ${business.province || 'no province'} | ${business.id}`);
+  // Generate and save booking slug
+  const slug = await findUniqueSlug(businessName);
+  await supabase.from('businesses').update({ booking_slug: slug }).eq('id', business.id);
+
+  console.log(`🏪 New business created: ${business.name} | slug: ${slug} | ${business.city || 'no city'}, ${business.province || 'no province'} | ${business.id}`);
   return business;
 }
 
-module.exports = { createBusiness };
+module.exports = { createBusiness, generateSlug };
