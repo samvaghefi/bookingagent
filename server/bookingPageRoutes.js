@@ -5,6 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { DateTime } = require('luxon');
 const { getFreeBusy, createCalendarEvent } = require('./calendarService');
 const { sendCustomerSMS, sendOwnerEmail }  = require('./notificationService');
+const { maybeScheduleReminder }            = require('./reminderService');
 const { createDepositToken }               = require('./depositService'); // already exists at server/depositService.js
 
 const router   = express.Router();
@@ -256,6 +257,7 @@ router.post('/api/book/:businessId', async (req, res) => {
         await sendCustomerSMS(business, booking);
         await sendOwnerEmail(business, booking);
         await createCalendarEvent(business, booking);
+        await maybeScheduleReminder(business, booking);
         await supabase.from('bookings')
           .update({ sms_sent: true, email_sent: true })
           .eq('id', booking.id);

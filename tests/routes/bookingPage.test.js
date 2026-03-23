@@ -69,6 +69,9 @@ function buildApp(supabaseMock) {
   jest.doMock('../../server/depositService', () => ({
     createDepositToken: jest.fn().mockReturnValue('tok_test'),
   }));
+  jest.doMock('../../server/reminderService', () => ({
+    maybeScheduleReminder: jest.fn().mockResolvedValue(undefined),
+  }));
 
   const router = require('../../server/bookingPageRoutes');
   const app = express();

@@ -18,6 +18,7 @@ const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
 const { extractFromToolCall, extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
 const { sendCustomerSMS, sendOwnerEmail, sendWelcomeEmail, sendInternalSignupNotification, sendPaymentFailedEmail } = require('./notificationService');
+const { sendDueReminders, maybeScheduleReminder } = require('./reminderService');
 const { getAuthUrl, getTokensFromCode, createCalendarEvent } = require('./calendarService');
 const stripe = require('stripe')(
   process.env.TEST_MODE === 'true'
@@ -379,6 +380,7 @@ app.post('/webhook/booking', async (req, res) => {
         await sendCustomerSMS(business, savedBooking);
         await sendOwnerEmail(business, savedBooking);
         await createCalendarEvent(business, savedBooking);
+        await maybeScheduleReminder(business, savedBooking);
         await supabase
           .from('bookings')
           .update({ sms_sent: true, email_sent: true })
@@ -422,6 +424,7 @@ app.post('/webhook/booking', async (req, res) => {
         await sendCustomerSMS(business, savedBooking);
         await sendOwnerEmail(business, savedBooking);
         await createCalendarEvent(business, savedBooking);
+        await maybeScheduleReminder(business, savedBooking);
         await supabase
           .from('bookings')
           .update({ sms_sent: true, email_sent: true })
@@ -1769,6 +1772,7 @@ app.post('/admin/test-provisioning', express.json(), async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   setInterval(() => queueService.autoExpireNoShows(), 60_000);
+  setInterval(() => sendDueReminders(), 3_600_000); // every hour
   console.log(`🚀 BookingAgent server running on port ${PORT}`);
   console.log(`📊 Environment: ${process.env.NODE_ENV}`);
   console.log(`🔗 Health check: http://localhost:${PORT}`);

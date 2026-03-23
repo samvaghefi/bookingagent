@@ -298,6 +298,37 @@ async function sendQueueReadySMS(customerPhone, customerName, businessName, from
   }
 }
 
+// ── sendReminderSMS ───────────────────────────────────────────────────────────
+// Sends a 24-hour reminder SMS to the customer.
+async function sendReminderSMS(business, booking) {
+  const services = Array.isArray(booking.service_ids)
+    ? booking.service_ids.join(' and ')
+    : booking.service_ids || 'appointment';
+
+  // Format HH:MM:SS → "2PM" or "2:30PM"
+  const [hStr, mStr] = (booking.appointment_time || '00:00').split(':');
+  const h = parseInt(hStr, 10);
+  const m = parseInt(mStr, 10);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 || 12;
+  const timeFormatted = m === 0 ? `${h12}${ampm}` : `${h12}:${String(m).padStart(2, '0')}${ampm}`;
+
+  const message = `Hi ${booking.customer_name}, just a reminder that your ${services} appointment at ${business.name} is tomorrow at ${timeFormatted}. See you then!`;
+
+  try {
+    await twilioClient.messages.create({
+      body: message,
+      from: business.twilio_phone,
+      to: booking.customer_phone,
+    });
+    console.log(`⏰ Reminder SMS sent to ${booking.customer_phone}`);
+    return true;
+  } catch (error) {
+    console.error('Reminder SMS error:', error);
+    return false;
+  }
+}
+
 module.exports = {
   sendCustomerSMS,
   sendOwnerEmail,
@@ -306,6 +337,7 @@ module.exports = {
   sendPaymentFailedEmail,
   sendDepositSMS,
   sendQueueReadySMS,
+  sendReminderSMS,
 };
 
 // ── sendDepositSMS ────────────────────────────────────────────────────────────
