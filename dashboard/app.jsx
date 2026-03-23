@@ -1076,6 +1076,69 @@ function SettingsPage({ setPage }) {
         );
       })()}
 
+      {/* ── Export Data ── */}
+      {(() => {
+        const plan = business?.plan || 'solo';
+        return (
+          <div className="card">
+            <div className="card-header">Export Data</div>
+            {plan === 'solo' ? (
+              <div style={{ color: '#6B7280', fontSize: 14 }}>
+                <p style={{ margin: '0 0 12px' }}>Export your bookings and client data as CSV. Available on Starter and Pro plans.</p>
+                <a href="#" onClick={e => { e.preventDefault(); setPage('billing'); }} className="btn-primary" style={{ display: 'inline-block', opacity: 0.7 }}>
+                  Upgrade to Starter
+                </a>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
+                <a
+                  href={`${typeof API_BASE !== 'undefined' ? API_BASE : ''}/api/export/bookings`}
+                  onClick={e => {
+                    e.preventDefault();
+                    const token = localStorage.getItem('bimbly_token');
+                    fetch((typeof API_BASE !== 'undefined' ? API_BASE : '') + '/api/export/bookings', {
+                      headers: { Authorization: `Bearer ${token}` },
+                    }).then(r => r.blob()).then(blob => {
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = 'bookings.csv';
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    });
+                  }}
+                  className="btn-primary"
+                  style={{ display: 'inline-block' }}
+                >
+                  Export Bookings (CSV)
+                </a>
+                <a
+                  href="#"
+                  onClick={e => {
+                    e.preventDefault();
+                    const token = localStorage.getItem('bimbly_token');
+                    fetch((typeof API_BASE !== 'undefined' ? API_BASE : '') + '/api/export/clients', {
+                      headers: { Authorization: `Bearer ${token}` },
+                    }).then(r => r.blob()).then(blob => {
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = 'clients.csv';
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    });
+                  }}
+                  className="btn-primary"
+                  style={{ display: 'inline-block' }}
+                >
+                  Export Clients (CSV)
+                </a>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* ── No-Show Deposits ── */}
       <div className="card">
         <div className="card-header">No-Show Deposits</div>
