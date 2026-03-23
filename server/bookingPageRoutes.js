@@ -41,7 +41,7 @@ router.get('/api/book/:businessId/info', async (req, res) => {
   try {
     const { data: business, error } = await supabase
       .from('businesses')
-      .select('id, name, address, business_hours, barbers, team_members, timezone, business_type')
+      .select('id, name, address, business_hours, barbers, team_members, timezone, business_type, logo_url, deposit_enabled')
       .eq('id', req.params.businessId)
       .eq('is_active', true)
       .single();
@@ -63,14 +63,16 @@ router.get('/api/book/:businessId/info', async (req, res) => {
 
     res.json({
       business: {
-        id:             business.id,
-        name:           business.name,
-        address:        business.address,
-        business_hours: business.business_hours || {},
-        timezone:       business.timezone || 'America/Toronto',
-        business_type:  business.business_type || '',
-        barbers:        teamMembers,
-        team_members:   teamMembers,
+        id:              business.id,
+        name:            business.name,
+        address:         business.address,
+        business_hours:  business.business_hours || {},
+        timezone:        business.timezone || 'America/Toronto',
+        business_type:   business.business_type || '',
+        barbers:         teamMembers,
+        team_members:    teamMembers,
+        logo_url:        business.logo_url || null,
+        deposit_enabled: business.deposit_enabled || false,
       },
       services: services || [],
     });

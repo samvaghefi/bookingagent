@@ -37,6 +37,7 @@ const authRoutes = require('./authRoutes');
 const intelRoutes = require('./intelRoutes');
 const queueService = require('./queueService');
 const bookingPageRoutes = require('./bookingPageRoutes');
+const logoRoutes = require('./logoRoutes');
 
 const app = express();
 
@@ -300,6 +301,7 @@ app.use(session({
 }));
 app.use(authRoutes);
 app.use(bookingPageRoutes);
+app.use(logoRoutes);
 app.use(dashboardRoutes);
 app.use(intelRoutes);
 

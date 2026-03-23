@@ -34,7 +34,7 @@ router.get('/api/business', async (req, res) => {
         'twilio_phone', 'timezone', 'barbers', 'team_members', 'plan',
         'deposit_enabled', 'deposit_amount',
         'queue_enabled', 'queue_notify_timeout',
-        'booking_slug'
+        'booking_slug', 'logo_url'
       ].join(', '))
       .eq('id', req.business.id)
       .single();

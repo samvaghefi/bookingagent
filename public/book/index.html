@@ -56,6 +56,9 @@
 </head>
 <body>
 <div class="card">
+  <div id="bizLogoWrap" style="display:none;text-align:center;margin-bottom:10px;">
+    <img id="bizLogo" src="" alt="" style="max-height:72px;max-width:200px;object-fit:contain;border-radius:6px;" />
+  </div>
   <p class="biz-name" id="bizName"></p>
   <div class="progress">
     <div class="step-dot active" id="d1"></div>
@@ -134,7 +137,15 @@ document.getElementById('dateInput').min = new Date().toISOString().split('T')[0
 
 fetch(`/api/book/${businessId}/info`)
   .then(r => r.json())
-  .then(data => { state.info = data; renderServices(data.services); })
+  .then(data => {
+    state.info = data;
+    renderServices(data.services);
+    const logoUrl = data.business?.logo_url;
+    if (logoUrl) {
+      document.getElementById('bizLogo').src = logoUrl;
+      document.getElementById('bizLogoWrap').style.display = '';
+    }
+  })
   .catch(() => {
     document.getElementById('serviceList').innerHTML = '<p class="msg err">Failed to load. Please refresh.</p>';
   });

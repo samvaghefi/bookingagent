@@ -7,10 +7,11 @@ const API_BASE = 'https://bookingagent-gmo2.onrender.com';
 // ── API helper ────────────────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
   const token = localStorage.getItem('bimbly_token');
+  const isFormData = options.body instanceof FormData;
   const res = await fetch(API_BASE + path, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       'Authorization': `Bearer ${token}`,
       ...(options.headers || {}),
     },
@@ -561,6 +562,8 @@ function SettingsPage({ setPage }) {
   const [recordMsg, setRecordMsg]       = useState('');
   const [depositSaving, setDepositSaving] = useState(false);
   const [depositMsg, setDepositMsg]       = useState('');
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [logoMsg, setLogoMsg]             = useState('');
   const recordDebounceRef = useRef(null);
 
   useEffect(() => {
@@ -646,6 +649,43 @@ function SettingsPage({ setPage }) {
       setDepositMsg('Failed to save.');
     } finally {
       setDepositSaving(false);
+    }
+  };
+
+  const handleLogoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setLogoUploading(true);
+    setLogoMsg('');
+    try {
+      const form = new FormData();
+      form.append('logo', file);
+      const res = await apiFetch('/api/business/logo', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) { setLogoMsg(data.error || 'Upload failed.'); return; }
+      setBusiness(b => ({ ...b, logo_url: data.logo_url }));
+      setLogoMsg('Logo uploaded!');
+      setTimeout(() => setLogoMsg(''), 2500);
+    } catch {
+      setLogoMsg('Upload failed.');
+    } finally {
+      setLogoUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleLogoDelete = async () => {
+    setLogoUploading(true);
+    setLogoMsg('');
+    try {
+      await apiFetch('/api/business/logo', { method: 'DELETE' });
+      setBusiness(b => ({ ...b, logo_url: null }));
+      setLogoMsg('Logo removed.');
+      setTimeout(() => setLogoMsg(''), 2500);
+    } catch {
+      setLogoMsg('Failed to remove logo.');
+    } finally {
+      setLogoUploading(false);
     }
   };
 
@@ -983,6 +1023,55 @@ function SettingsPage({ setPage }) {
                 {saving ? 'Saving...' : 'Save Team Members'}
               </button>
             </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Logo ── */}
+      {(() => {
+        const plan = business?.plan || 'solo';
+        return (
+          <div className="card">
+            <div className="card-header">Booking Page Logo</div>
+            {plan === 'solo' ? (
+              <p style={{ color: '#6B7280', fontSize: 14, margin: '12px 0' }}>
+                Logo upload is available on the Starter plan and above.{' '}
+                <a href="#" onClick={e => { e.preventDefault(); setPage('billing'); }} style={{ color: '#534AB7' }}>
+                  Upgrade to Starter
+                </a>
+              </p>
+            ) : (
+              <div className="settings-grid">
+                <div className="form-group full-width">
+                  {business?.logo_url && (
+                    <div style={{ marginBottom: 12 }}>
+                      <img src={business.logo_url} alt="Business logo" style={{ maxHeight: 80, maxWidth: 240, borderRadius: 6, border: '1px solid #e5e7eb', objectFit: 'contain' }} />
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    onChange={handleLogoUpload}
+                    disabled={logoUploading}
+                    style={{ fontSize: 14 }}
+                  />
+                  <p style={{ color: '#6B7280', fontSize: 12, marginTop: 6 }}>PNG or JPG, max 2MB. Displayed at the top of your public booking page.</p>
+                  {business?.logo_url && (
+                    <button
+                      className="btn-danger"
+                      style={{ marginTop: 8 }}
+                      onClick={handleLogoDelete}
+                      disabled={logoUploading}
+                    >
+                      Remove Logo
+                    </button>
+                  )}
+                  {logoMsg && (
+                    <span className={`save-msg ${logoMsg.includes('!') ? 'success' : logoMsg.includes('removed') ? 'success' : 'error'}`} style={{ marginLeft: 8 }}>{logoMsg}</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
