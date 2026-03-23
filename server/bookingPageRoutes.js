@@ -101,7 +101,10 @@ router.get('/api/book/:businessId/availability', async (req, res) => {
 
     const tz       = business.timezone || 'America/Toronto';
     const hours    = business.business_hours || {};
-    const dayKey   = DateTime.fromISO(date, { zone: tz }).weekdayLong.toLowerCase();
+    // Use numeric weekday (locale-independent: 1=Mon…7=Sun) to avoid Intl locale issues
+    // that cause weekdayLong to return non-English names on some server environments.
+    const DAY_KEYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+    const dayKey   = DAY_KEYS[DateTime.fromISO(date, { zone: tz }).weekday - 1];
     const dayHours = hours[dayKey];
 
     if (!dayHours || dayHours.closed) return res.json({ slots: [], closed: true });
