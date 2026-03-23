@@ -293,6 +293,9 @@ app.get('/deposit/:token', async (req, res) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+// Trust Render's reverse proxy so req.secure is true for HTTPS requests,
+// which is required for express-session to set the Secure cookie attribute.
+app.set('trust proxy', 1);
 app.use(session({
   secret: process.env.INTEL_SESSION_SECRET || 'changeme-set-INTEL_SESSION_SECRET',
   resave: false,
