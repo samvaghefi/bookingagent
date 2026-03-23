@@ -40,7 +40,7 @@ router.get('/api/book/:businessId/info', async (req, res) => {
   try {
     const { data: business, error } = await supabase
       .from('businesses')
-      .select('id, name, address, business_hours, barbers, timezone')
+      .select('id, name, address, business_hours, barbers, team_members, timezone, business_type')
       .eq('id', req.params.businessId)
       .eq('is_active', true)
       .single();
@@ -54,10 +54,11 @@ router.get('/api/book/:businessId/info', async (req, res) => {
       .eq('is_active', true)
       .order('name');
 
-    // Normalise barbers: support legacy string array and new object array
-    const barbers = (business.barbers || []).map(b =>
-      typeof b === 'string' ? { name: b, calendarId: '' } : b
-    );
+    // Normalise team members: prefer team_members column, fall back to barbers
+    const rawMembers = business.team_members || business.barbers || [];
+    const teamMembers = rawMembers.map(m =>
+      typeof m === 'string' ? { name: m, role: '', calendarId: '' } : { role: '', calendarId: '', ...m }
+    ).filter(m => m.name);
 
     res.json({
       business: {
@@ -66,7 +67,9 @@ router.get('/api/book/:businessId/info', async (req, res) => {
         address:        business.address,
         business_hours: business.business_hours || {},
         timezone:       business.timezone || 'America/Toronto',
-        barbers,
+        business_type:  business.business_type || '',
+        barbers:        teamMembers,
+        team_members:   teamMembers,
       },
       services: services || [],
     });
@@ -90,7 +93,7 @@ router.get('/api/book/:businessId/availability', async (req, res) => {
   try {
     const { data: business, error } = await supabase
       .from('businesses')
-      .select('id, business_hours, barbers, timezone, google_access_token, google_refresh_token')
+      .select('id, business_hours, barbers, team_members, timezone, google_access_token, google_refresh_token')
       .eq('id', req.params.businessId)
       .single();
 
@@ -131,10 +134,11 @@ router.get('/api/book/:businessId/availability', async (req, res) => {
       return { start, end: start.plus({ minutes: b.duration_minutes || 60 }) };
     });
 
-    // Normalise barbers
-    const barbers = (business.barbers || []).map(b =>
-      typeof b === 'string' ? { name: b, calendarId: '' } : b
-    );
+    // Normalise barbers: prefer team_members column, fall back to barbers
+    const rawMembers = business.team_members || business.barbers || [];
+    const barbers = rawMembers.map(b =>
+      typeof b === 'string' ? { name: b, role: '', calendarId: '' } : { role: '', calendarId: '', ...b }
+    ).filter(b => b.name);
 
     // Google Calendar free/busy — use barber's calendarId if provided, else 'primary'
     let calendarId = 'primary';

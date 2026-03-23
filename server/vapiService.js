@@ -12,7 +12,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const { formatBusinessHours, formatServices, getTimezoneInfo } = require('./vapiHelpers');
+const { formatBusinessHours, formatServices, getTimezoneInfo, formatTeamMembers } = require('./vapiHelpers');
 
 // Load the canonical system prompt template from disk (version-controlled source of truth)
 const PROMPT_TEMPLATE_PATH = path.join(__dirname, '..', 'vapi-system-prompt.txt');
@@ -72,6 +72,7 @@ function buildSystemPrompt(business, { services = [], businessHours = null } = {
     .replace(/\{\{timezoneLabel\}\}/g,    tzInfo.label)
     .replace(/\{\{openingHours\}\}/g,     formatBusinessHours(businessHours || business.business_hours || null))
     .replace(/\{\{services\}\}/g,         formatServices(services))
+    .replace(/\{\{teamMembers\}\}/g,      formatTeamMembers(business.team_members || business.barbers || []))
     .replace(/\{\{depositPolicy\}\}/g,    depositPolicyText);
 
   if (!langs.includes('ko')) {
@@ -193,8 +194,7 @@ async function updateVapiAssistant(assistantId, business, services, barbers, { b
   }
 
   if (barbers && barbers.length > 0) {
-    const barberLines = barbers.map(b => `- ${b}`).join('\n');
-    const teamBlock = `TEAM MEMBERS:\n${barberLines}`;
+    const teamBlock = `TEAM MEMBERS:\n${formatTeamMembers(barbers)}`;
     // Support both old 'TEAM:' header and new 'TEAM MEMBERS:'
     if (systemPrompt.includes('TEAM MEMBERS:') || systemPrompt.includes('TEAM:')) {
       systemPrompt = systemPrompt

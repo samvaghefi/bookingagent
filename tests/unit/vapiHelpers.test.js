@@ -5,6 +5,7 @@ const {
   formatBusinessHours,
   formatServices,
   getTimezoneInfo,
+  formatTeamMembers,
 } = require('../../server/vapiHelpers');
 
 describe('format12h', () => {
@@ -125,6 +126,49 @@ describe('getTimezoneInfo', () => {
   });
 });
 
+describe('formatTeamMembers', () => {
+  test('null → not configured', () => {
+    expect(formatTeamMembers(null)).toBe('(No team members configured yet)');
+  });
+
+  test('empty array → not configured', () => {
+    expect(formatTeamMembers([])).toBe('(No team members configured yet)');
+  });
+
+  test('legacy string array → name-only bullets', () => {
+    expect(formatTeamMembers(['Sam', 'Alex'])).toBe('- Sam\n- Alex');
+  });
+
+  test('object with role → name (role)', () => {
+    expect(formatTeamMembers([{ name: 'Sam', role: 'Barber', calendarId: '' }])).toBe('- Sam (Barber)');
+  });
+
+  test('object without role → name only', () => {
+    expect(formatTeamMembers([{ name: 'Sam', calendarId: '' }])).toBe('- Sam');
+  });
+
+  test('object with empty role → name only', () => {
+    expect(formatTeamMembers([{ name: 'Sam', role: '' }])).toBe('- Sam');
+  });
+
+  test('multiple members separated by newlines', () => {
+    const result = formatTeamMembers([
+      { name: 'Sam', role: 'Barber', calendarId: '' },
+      { name: 'Alex', role: 'Apprentice', calendarId: '' },
+    ]);
+    expect(result).toBe('- Sam (Barber)\n- Alex (Apprentice)');
+  });
+
+  test('mixed legacy and object format', () => {
+    const result = formatTeamMembers(['Sam', { name: 'Alex', role: 'Stylist' }]);
+    expect(result).toBe('- Sam\n- Alex (Stylist)');
+  });
+
+  test('skips entries with no name', () => {
+    expect(formatTeamMembers([{ name: 'Sam', role: 'Barber' }, { role: 'Manager' }])).toBe('- Sam (Barber)');
+  });
+});
+
 describe('system prompt placeholder substitution', () => {
   test('{{businessName}} is replaced, no placeholder remains', () => {
     const result = 'You are an assistant for {{businessName}}.'.replace(/\{\{businessName\}\}/g, "Sam's Barbershop");
@@ -135,5 +179,12 @@ describe('system prompt placeholder substitution', () => {
   test('{{currentDateTime}} is NOT replaced (Vapi fills it at runtime)', () => {
     const result = 'Time: {{currentDateTime}}.'.replace(/\{\{businessName\}\}/g, "Sam's Barbershop");
     expect(result).toContain('{{currentDateTime}}');
+  });
+
+  test('{{teamMembers}} is replaced, no placeholder remains', () => {
+    const members = [{ name: 'Sam', role: 'Barber', calendarId: '' }];
+    const result = 'TEAM MEMBERS:\n{{teamMembers}}'.replace(/\{\{teamMembers\}\}/g, formatTeamMembers(members));
+    expect(result).toContain('Sam (Barber)');
+    expect(result).not.toContain('{{teamMembers}}');
   });
 });

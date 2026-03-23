@@ -27,6 +27,12 @@ SERVICES:
 {{services}}
 - Only book services listed above. If a customer asks for something not on the list, suggest the closest available service.
 
+TEAM MEMBERS:
+{{teamMembers}}
+- When a caller asks to book with a specific team member, capture their name in the preferredBarber field.
+- If the caller has no preference, omit preferredBarber or leave it blank.
+- If a caller asks who is available or who they can book with, list the names above.
+
 Collect the following information from the customer during the call:
 - Their name (customerName)
 - The service they want (service) — must be one of the services listed in the SERVICES section above

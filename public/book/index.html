@@ -93,7 +93,7 @@
     <div class="field"><label>Phone *</label><input type="tel" id="custPhone" placeholder="+1 (416) 555-0000" autocomplete="tel"></div>
     <div class="field"><label>Email (optional)</label><input type="email" id="custEmail" placeholder="you@example.com" autocomplete="email"></div>
     <div class="field" id="barberFieldWrap">
-      <label>Preferred team member (optional)</label>
+      <label id="barberLabel">Preferred team member (optional)</label>
       <select id="barberSelect"><option value="">No preference</option></select>
     </div>
     <div class="field"><label>Special requests (optional)</label><textarea id="custRequests" rows="3" placeholder="e.g. Leave the beard, short on sides"></textarea></div>
@@ -236,11 +236,24 @@ function fmt(t) {
 }
 
 // ── Step 3: Contact + barber ──────────────────────────────────────────────────
+function teamMemberLabel(bizType) {
+  const t = (bizType || '').toLowerCase();
+  if (t.includes('barber')) return 'Preferred barber (optional)';
+  if (t.includes('hair'))   return 'Preferred stylist (optional)';
+  if (t.includes('nail'))   return 'Preferred technician (optional)';
+  return 'Preferred team member (optional)';
+}
+
 function populateBarbers() {
-  const sel     = document.getElementById('barberSelect');
-  const barbers = state.info?.business?.barbers || [];
+  const sel      = document.getElementById('barberSelect');
+  const barbers  = state.info?.business?.barbers || [];
+  const bizType  = state.info?.business?.business_type || '';
   while (sel.options.length > 1) sel.remove(1);
-  barbers.forEach(b => sel.appendChild(new Option(b.name, b.name)));
+  barbers.forEach(b => {
+    const optLabel = b.role ? `${b.name} — ${b.role}` : b.name;
+    sel.appendChild(new Option(optLabel, b.name));
+  });
+  document.getElementById('barberLabel').textContent = teamMemberLabel(bizType);
   document.getElementById('barberFieldWrap').style.display = barbers.length ? '' : 'none';
 }
 

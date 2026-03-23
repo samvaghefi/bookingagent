@@ -67,4 +67,15 @@ function getTimezoneInfo(timezone) {
   return TIMEZONE_INFO[timezone] || { label: timezone, location: 'Canada' };
 }
 
-module.exports = { format12h, formatBusinessHours, formatServices, getTimezoneInfo };
+// Format a team_members array into a human-readable bullet list for the Vapi prompt.
+// Supports: legacy string array, object array with {name, role, calendarId}.
+function formatTeamMembers(teamMembers) {
+  if (!Array.isArray(teamMembers) || teamMembers.length === 0) return '(No team members configured yet)';
+  const lines = teamMembers
+    .map(m => typeof m === 'string' ? { name: m, role: '' } : m)
+    .filter(m => m && m.name)
+    .map(m => m.role ? `- ${m.name} (${m.role})` : `- ${m.name}`);
+  return lines.length ? lines.join('\n') : '(No team members configured yet)';
+}
+
+module.exports = { format12h, formatBusinessHours, formatServices, getTimezoneInfo, formatTeamMembers };

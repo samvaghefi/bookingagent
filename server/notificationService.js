@@ -24,7 +24,8 @@ async function sendCustomerSMS(business, booking) {
   const services = Array.isArray(booking.service_ids)
     ? booking.service_ids.join(' and ')
     : booking.service_ids || 'your appointment';
-  const message = `Thanks for booking with ${business.name}! Your ${services} is on ${booking.appointment_date} at ${booking.appointment_time}. We'll see you at ${business.address}.`;
+  const memberLine = booking.preferred_barber ? ` with ${booking.preferred_barber}` : '';
+  const message = `Thanks for booking with ${business.name}! Your ${services}${memberLine} is on ${booking.appointment_date} at ${booking.appointment_time}. We'll see you at ${business.address}.`;
 
   try {
     await twilioClient.messages.create({
@@ -62,7 +63,7 @@ async function sendOwnerEmail(business, bookingOrSubject, alertText) {
       const services = Array.isArray(booking.service_ids)
         ? booking.service_ids.join(' and ')
         : booking.service_ids || '';
-      const text = `New Booking at ${business.name}!\n\nCustomer: ${booking.customer_name}\nPhone: ${booking.customer_phone}\nCallback Number: ${booking.callback_number || booking.customer_phone}\nService: ${services}\nService Count: ${booking.service_count || 1}\nDate: ${booking.appointment_date}\nTime: ${booking.appointment_time}\nSpecial Requests: ${booking.special_requests || 'None'}\nPreferred Barber: ${booking.preferred_barber || 'No preference'}\nNew Customer: ${booking.is_new_customer ? 'Yes' : 'No'}\n\nPlease add this to your calendar.`;
+      const text = `New Booking at ${business.name}!\n\nCustomer: ${booking.customer_name}\nPhone: ${booking.customer_phone}\nCallback Number: ${booking.callback_number || booking.customer_phone}\nService: ${services}\nService Count: ${booking.service_count || 1}\nDate: ${booking.appointment_date}\nTime: ${booking.appointment_time}\nSpecial Requests: ${booking.special_requests || 'None'}\nTeam Member: ${booking.preferred_barber || 'No preference'}\nNew Customer: ${booking.is_new_customer ? 'Yes' : 'No'}\n\nPlease add this to your calendar.`;
       msg = {
         to: business.email,
         from: FROM,

@@ -31,7 +31,7 @@ router.get('/api/business', async (req, res) => {
         'business_hours', 'ai_name', 'business_type', 'billing_email',
         'subscription_status', 'trial_ends_at', 'stripe_customer_id',
         'stripe_subscription_id', 'is_active', 'created_at', 'call_recording_enabled', 'supported_languages',
-        'twilio_phone', 'timezone', 'barbers', 'plan',
+        'twilio_phone', 'timezone', 'barbers', 'team_members', 'plan',
         'deposit_enabled', 'deposit_amount',
         'queue_enabled', 'queue_notify_timeout',
         'booking_slug'
@@ -40,7 +40,9 @@ router.get('/api/business', async (req, res) => {
       .single();
 
     if (error) throw error;
-    res.json({ business });
+    // Normalise team_members: merge from barbers if team_members is empty, add role field if missing
+    const teamMembers = normalizeTeamMembers(business.team_members || business.barbers);
+    res.json({ business: { ...business, team_members: teamMembers, barbers: teamMembers } });
   } catch (err) {
     console.error('GET /api/business error:', err.message);
     res.status(500).json({ error: err.message });
@@ -49,14 +51,33 @@ router.get('/api/business', async (req, res) => {
 
 // PUT /api/business — update allowed business fields
 // Fields that require a Vapi system-prompt rebuild when changed:
-const VAPI_PROMPT_FIELDS = new Set(['name', 'address', 'business_hours', 'ai_name', 'barbers', 'deposit_enabled', 'deposit_amount']);
+const VAPI_PROMPT_FIELDS = new Set(['name', 'address', 'business_hours', 'ai_name', 'barbers', 'team_members', 'deposit_enabled', 'deposit_amount']);
+
+// Normalise a raw team_members/barbers value to [{name, role, calendarId}]
+function normalizeTeamMembers(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(m =>
+    typeof m === 'string'
+      ? { name: m, role: '', calendarId: '' }
+      : { role: '', calendarId: '', ...m }
+  ).filter(m => m.name);
+}
 
 router.put('/api/business', async (req, res) => {
-  const allowed = ['name', 'phone', 'address', 'business_hours', 'ai_name', 'business_type', 'timezone', 'barbers', 'deposit_enabled', 'deposit_amount', 'queue_enabled', 'queue_notify_timeout'];
+  const allowed = ['name', 'phone', 'address', 'business_hours', 'ai_name', 'business_type', 'timezone', 'barbers', 'team_members', 'deposit_enabled', 'deposit_amount', 'queue_enabled', 'queue_notify_timeout'];
   const updates = {};
   allowed.forEach(field => {
     if (req.body[field] !== undefined) updates[field] = req.body[field];
   });
+
+  // Normalise team_members: write to both columns for transition period
+  if (updates.team_members !== undefined) {
+    updates.team_members = normalizeTeamMembers(updates.team_members);
+    updates.barbers = updates.team_members;
+  } else if (updates.barbers !== undefined) {
+    updates.team_members = normalizeTeamMembers(updates.barbers);
+    updates.barbers = updates.team_members;
+  }
 
   if (Object.keys(updates).length === 0) {
     return res.status(400).json({ error: 'No valid fields to update.' });

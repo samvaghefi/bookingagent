@@ -15,7 +15,9 @@ const BUSINESS = {
     sunday:   { open: '09:00', close: '17:00', closed: true  },
   },
   timezone: 'America/Toronto',
+  business_type: 'Barbershop',
   barbers: [],
+  team_members: [],
   is_active: true,
   deposit_enabled: false,
   google_access_token: null,
@@ -95,8 +97,8 @@ describe('GET /api/book/:businessId/info', () => {
     });
   });
 
-  test('normalises legacy string barbers to { name, calendarId }', () => {
-    const bizWithStrings = { ...BUSINESS, barbers: ['Sam', 'Alex'] };
+  test('normalises legacy string barbers to { name, role, calendarId }', () => {
+    const bizWithStrings = { ...BUSINESS, barbers: ['Sam', 'Alex'], team_members: null };
     const supabase = {
       from: (table) => {
         if (table === 'businesses') return chain({ data: bizWithStrings, error: null });
@@ -107,8 +109,62 @@ describe('GET /api/book/:businessId/info', () => {
     const app = buildApp(supabase);
     return request(app).get('/api/book/biz-123/info').then(res => {
       expect(res.status).toBe(200);
-      expect(res.body.business.barbers[0]).toEqual({ name: 'Sam', calendarId: '' });
-      expect(res.body.business.barbers[1]).toEqual({ name: 'Alex', calendarId: '' });
+      expect(res.body.business.barbers[0]).toEqual({ name: 'Sam', role: '', calendarId: '' });
+      expect(res.body.business.barbers[1]).toEqual({ name: 'Alex', role: '', calendarId: '' });
+    });
+  });
+
+  test('preserves role field from team_members column', () => {
+    const bizWithRoles = { ...BUSINESS, team_members: [{ name: 'Sam', role: 'Barber', calendarId: '' }], barbers: [] };
+    const supabase = {
+      from: (table) => {
+        if (table === 'businesses') return chain({ data: bizWithRoles, error: null });
+        if (table === 'services')   return { select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }) }) };
+        return chain({ data: null, error: null });
+      },
+    };
+    const app = buildApp(supabase);
+    return request(app).get('/api/book/biz-123/info').then(res => {
+      expect(res.status).toBe(200);
+      expect(res.body.business.team_members[0]).toEqual({ name: 'Sam', role: 'Barber', calendarId: '' });
+      expect(res.body.business.team_members[0].role).toBe('Barber');
+    });
+  });
+
+  test('returns business_type in /info response', () => {
+    const supabase = {
+      from: (table) => {
+        if (table === 'businesses') return chain({ data: BUSINESS, error: null });
+        if (table === 'services')   return { select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: SERVICES, error: null }) }) }) }) };
+        return chain({ data: null, error: null });
+      },
+    };
+    const app = buildApp(supabase);
+    return request(app).get('/api/book/biz-123/info').then(res => {
+      expect(res.status).toBe(200);
+      expect(res.body.business.business_type).toBeDefined();
+      expect(res.body.business.business_type).toBe('Barbershop');
+    });
+  });
+
+  test('team_members preferred over barbers when both present', () => {
+    const biz = {
+      ...BUSINESS,
+      team_members: [{ name: 'Sam', role: 'Barber', calendarId: '' }],
+      barbers: [{ name: 'OldData', calendarId: '' }],
+    };
+    const supabase = {
+      from: (table) => {
+        if (table === 'businesses') return chain({ data: biz, error: null });
+        if (table === 'services')   return { select: () => ({ eq: () => ({ eq: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }) }) };
+        return chain({ data: null, error: null });
+      },
+    };
+    const app = buildApp(supabase);
+    return request(app).get('/api/book/biz-123/info').then(res => {
+      expect(res.status).toBe(200);
+      expect(res.body.business.team_members[0].name).toBe('Sam');
+      expect(res.body.business.team_members[0].role).toBe('Barber');
     });
   });
 

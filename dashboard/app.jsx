@@ -572,7 +572,7 @@ function SettingsPage({ setPage }) {
         const biz = b.business || b;
         setBusiness({ ...biz, deposit_amount_display: biz.deposit_amount != null ? biz.deposit_amount / 100 : 25 });
         setServices(s.services || s || []);
-        setBarbers((biz.barbers || []).map(b => typeof b === 'string' ? { name: b, calendarId: '' } : b));
+        setBarbers((biz.team_members || biz.barbers || []).map(b => typeof b === 'string' ? { name: b, role: '', calendarId: '' } : { role: '', calendarId: '', ...b }));
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -594,7 +594,7 @@ function SettingsPage({ setPage }) {
           address:        business.address,
           business_hours: normalizedHours,
           ai_name:        business.ai_name,
-          barbers,
+          team_members:   barbers,
         }),
       });
       setSaveMsg('Saved!');
@@ -887,69 +887,91 @@ function SettingsPage({ setPage }) {
       </div>
 
       {/* ── Team Members ── */}
-      {business?.plan !== 'solo' ? <div className="card">
-        <div className="card-header">Team Members</div>
-        <p className="card-note">
-          These names are used by your AI receptionist when customers request a specific team member.
-        </p>
-        <div className="barbers-list">
-          {barbers.map((barber, i) => (
-            <div key={i} style={{ marginBottom: 10 }}>
-              <div className="barber-chip" style={{ marginBottom: 4 }}>
-                {barber.name}{i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
-                {i !== 0 && (
-                  <button
-                    className="chip-remove"
-                    onClick={() => setBarbers(b => b.filter((_, j) => j !== i))}
-                  >×</button>
-                )}
-              </div>
-              <input
-                type="text"
-                placeholder="Google Calendar ID (optional, e.g. name@gmail.com)"
-                value={barber.calendarId || ''}
-                onChange={e => setBarbers(b => b.map((x, j) => j === i ? { ...x, calendarId: e.target.value } : x))}
-                style={{ fontSize: 12, padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6, width: '100%', color: '#6b7280' }}
-              />
+      {(() => {
+        const bizType = (business?.business_type || '').toLowerCase();
+        const roleLabel = bizType.includes('barber') ? 'Barber'
+          : bizType.includes('hair') ? 'Stylist'
+          : bizType.includes('nail') ? 'Technician'
+          : 'Team Member';
+        const roleOptions = bizType.includes('barber')
+          ? ['Barber', 'Apprentice', 'Manager']
+          : bizType.includes('hair')
+          ? ['Stylist', 'Colorist', 'Apprentice', 'Manager']
+          : bizType.includes('nail')
+          ? ['Technician', 'Apprentice', 'Manager']
+          : ['Team Member', 'Manager'];
+        return (
+          <div className="card">
+            <div className="card-header">Team Members</div>
+            <p className="card-note">
+              These names are used by your AI receptionist when customers request a specific team member.
+            </p>
+            <div className="barbers-list">
+              {barbers.map((barber, i) => (
+                <div key={i} style={{ marginBottom: 12 }}>
+                  <div className="barber-chip" style={{ marginBottom: 4 }}>
+                    {barber.name}{i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
+                    {barber.role && <span style={{ fontSize: 11, background: '#ede9fe', color: '#6d28d9', borderRadius: 4, padding: '1px 6px', marginLeft: 6 }}>{barber.role}</span>}
+                    {i !== 0 && (
+                      <button
+                        className="chip-remove"
+                        onClick={() => setBarbers(b => b.filter((_, j) => j !== i))}
+                      >×</button>
+                    )}
+                  </div>
+                  <select
+                    value={barber.role || ''}
+                    onChange={e => setBarbers(b => b.map((x, j) => j === i ? { ...x, role: e.target.value } : x))}
+                    style={{ fontSize: 12, padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6, width: '100%', color: '#374151', marginBottom: 4 }}
+                  >
+                    <option value="">Role (optional)</option>
+                    {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Google Calendar ID (optional, e.g. name@gmail.com)"
+                    value={barber.calendarId || ''}
+                    onChange={e => setBarbers(b => b.map((x, j) => j === i ? { ...x, calendarId: e.target.value } : x))}
+                    style={{ fontSize: 12, padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6, width: '100%', color: '#6b7280' }}
+                  />
+                </div>
+              ))}
+              {barbers.length === 0 && (
+                <span style={{ color: '#9ca3af', fontSize: 13 }}>No team members added yet.</span>
+              )}
             </div>
-          ))}
-          {barbers.length === 0 && (
-            <span style={{ color: '#9ca3af', fontSize: 13 }}>No team members added yet.</span>
-          )}
-        </div>
-        <div className="add-barber-row">
-          <input
-            placeholder="Name"
-            value={newBarber}
-            onChange={e => setNewBarber(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && newBarber.trim()) {
-                setBarbers(b => [...b, { name: newBarber.trim(), calendarId: '' }]);
-                setNewBarber('');
-              }
-            }}
-          />
-          <button
-            className="btn-outline"
-            onClick={() => {
-              if (newBarber.trim()) {
-                setBarbers(b => [...b, { name: newBarber.trim(), calendarId: '' }]);
-                setNewBarber('');
-              }
-            }}
-          >
-            Add
-          </button>
-        </div>
-        <div className="save-row">
-          <button className="btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Team Members'}
-          </button>
-        </div>
-      </div> : <div className="card">
-        <div className="card-header">Team Members</div>
-        <p className="card-note" style={{color:'#9ca3af'}}>Team members are available on Starter and Pro plans. <a href="#" onClick={e=>{e.preventDefault();setPage('billing')}} style={{color:'#534ab7'}}>Upgrade your plan →</a></p>
-      </div>}
+            <div className="add-barber-row">
+              <input
+                placeholder={`${roleLabel} name`}
+                value={newBarber}
+                onChange={e => setNewBarber(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && newBarber.trim()) {
+                    setBarbers(b => [...b, { name: newBarber.trim(), role: '', calendarId: '' }]);
+                    setNewBarber('');
+                  }
+                }}
+              />
+              <button
+                className="btn-outline"
+                onClick={() => {
+                  if (newBarber.trim()) {
+                    setBarbers(b => [...b, { name: newBarber.trim(), role: '', calendarId: '' }]);
+                    setNewBarber('');
+                  }
+                }}
+              >
+                Add
+              </button>
+            </div>
+            <div className="save-row">
+              <button className="btn-primary" onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving...' : 'Save Team Members'}
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── No-Show Deposits ── */}
       <div className="card">
@@ -1349,9 +1371,13 @@ function OnboardingPage({ setPage }) {
           business_type:  bizType,
           timezone:       biz.timezone      || 'America/Toronto',
           business_hours: biz.business_hours || {},
-          barbers:        biz.barbers && biz.barbers.length > 0
-                            ? biz.barbers
-                            : (biz.plan !== 'solo' && biz.owner_name ? [biz.owner_name] : []),
+          barbers:        (() => {
+                            const src = biz.team_members || biz.barbers;
+                            if (src && src.length > 0) {
+                              return src.map(m => typeof m === 'string' ? { name: m, role: '', calendarId: '' } : { role: '', calendarId: '', ...m });
+                            }
+                            return biz.owner_name ? [{ name: biz.owner_name, role: '', calendarId: '' }] : [];
+                          })(),
           services:       svcs.length > 0 ? svcs : (SERVICE_DEFAULTS[bizType] || SERVICE_DEFAULTS['Barbershop']),
         });
       })
@@ -1388,7 +1414,7 @@ function OnboardingPage({ setPage }) {
 
   const addBarber = () => {
     if (newBarber.trim()) {
-      setData(d => ({ ...d, barbers: [...d.barbers, { name: newBarber.trim(), calendarId: '' }] }));
+      setData(d => ({ ...d, barbers: [...d.barbers, { name: newBarber.trim(), role: '', calendarId: '' }] }));
       setNewBarber('');
     }
   };
@@ -1415,7 +1441,7 @@ function OnboardingPage({ setPage }) {
           business_type:  data.business_type,
           timezone:       data.timezone,
           business_hours: data.business_hours,
-          barbers:        data.barbers,
+          team_members:   data.barbers,
         }),
       });
       console.log('[complete] data.services to save:', JSON.stringify(data.services));
