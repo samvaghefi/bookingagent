@@ -889,10 +889,10 @@ function SettingsPage({ setPage }) {
       {/* ── Team Members ── */}
       {(() => {
         const bizType = (business?.business_type || '').toLowerCase();
-        const roleLabel = bizType.includes('barber') ? 'Barber'
-          : bizType.includes('hair') ? 'Stylist'
-          : bizType.includes('nail') ? 'Technician'
-          : 'Team Member';
+        const memberWord = bizType.includes('barber') ? 'barbers'
+          : bizType.includes('hair') ? 'stylists'
+          : bizType.includes('nail') ? 'technicians'
+          : 'team members';
         const roleOptions = bizType.includes('barber')
           ? ['Barber', 'Apprentice', 'Manager']
           : bizType.includes('hair')
@@ -900,11 +900,19 @@ function SettingsPage({ setPage }) {
           : bizType.includes('nail')
           ? ['Technician', 'Apprentice', 'Manager']
           : ['Team Member', 'Manager'];
+        const plan = business?.plan || 'solo';
+        const maxMembers = plan === 'pro' ? Infinity : plan === 'starter' ? 4 : 1;
+        const atLimit = barbers.length >= maxMembers;
+        const upgradeMsg = plan === 'solo'
+          ? 'Upgrade to Starter to add more team members'
+          : plan === 'starter'
+          ? 'Upgrade to Pro to add more team members'
+          : null;
         return (
           <div className="card">
             <div className="card-header">Team Members</div>
             <p className="card-note">
-              These names are used by your AI receptionist when customers request a specific team member.
+              These names are used by your AI receptionist when customers request a specific {memberWord.slice(0, -1)}.
             </p>
             <div className="barbers-list">
               {barbers.map((barber, i) => (
@@ -937,33 +945,39 @@ function SettingsPage({ setPage }) {
                 </div>
               ))}
               {barbers.length === 0 && (
-                <span style={{ color: '#9ca3af', fontSize: 13 }}>No team members added yet.</span>
+                <span style={{ color: '#9ca3af', fontSize: 13 }}>No {memberWord} added yet.</span>
               )}
             </div>
-            <div className="add-barber-row">
-              <input
-                placeholder={`${roleLabel} name`}
-                value={newBarber}
-                onChange={e => setNewBarber(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && newBarber.trim()) {
-                    setBarbers(b => [...b, { name: newBarber.trim(), role: '', calendarId: '' }]);
-                    setNewBarber('');
-                  }
-                }}
-              />
-              <button
-                className="btn-outline"
-                onClick={() => {
-                  if (newBarber.trim()) {
-                    setBarbers(b => [...b, { name: newBarber.trim(), role: '', calendarId: '' }]);
-                    setNewBarber('');
-                  }
-                }}
-              >
-                Add
-              </button>
-            </div>
+            {atLimit ? (
+              upgradeMsg && <p className="card-note" style={{ marginTop: 10, color: '#9ca3af' }}>
+                {upgradeMsg}. <a href="#" onClick={e => { e.preventDefault(); setPage('billing'); }} style={{ color: '#534ab7' }}>Upgrade your plan →</a>
+              </p>
+            ) : (
+              <div className="add-barber-row">
+                <input
+                  placeholder="Team member name"
+                  value={newBarber}
+                  onChange={e => setNewBarber(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && newBarber.trim()) {
+                      setBarbers(b => [...b, { name: newBarber.trim(), role: '', calendarId: '' }]);
+                      setNewBarber('');
+                    }
+                  }}
+                />
+                <button
+                  className="btn-outline"
+                  onClick={() => {
+                    if (newBarber.trim()) {
+                      setBarbers(b => [...b, { name: newBarber.trim(), role: '', calendarId: '' }]);
+                      setNewBarber('');
+                    }
+                  }}
+                >
+                  Add
+                </button>
+              </div>
+            )}
             <div className="save-row">
               <button className="btn-primary" onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving...' : 'Save Team Members'}
