@@ -68,17 +68,17 @@ describe('formatServices', () => {
   });
 
   test('name + price', () => {
-    expect(formatServices([{ name: "Men's Haircut", price: 35 }])).toBe("- Men's Haircut – $35");
+    expect(formatServices([{ name: "Men's Haircut", price: 35 }])).toBe("- Men's Haircut, thirty-five dollars");
   });
 
   test('name + price + duration', () => {
     expect(formatServices([{ name: "Men's Haircut", price: 35, duration_minutes: 30 }]))
-      .toBe("- Men's Haircut – $35 (30 min)");
+      .toBe("- Men's Haircut, thirty-five dollars, thirty minutes");
   });
 
   test('name + price + duration + description', () => {
     expect(formatServices([{ name: 'Beard Trim', price: 20, duration_minutes: 20, description: 'Includes hot towel' }]))
-      .toBe('- Beard Trim – $20 (20 min) — Includes hot towel');
+      .toBe('- Beard Trim, twenty dollars, twenty minutes — Includes hot towel');
   });
 
   test('multiple services separated by newlines', () => {
@@ -86,12 +86,41 @@ describe('formatServices', () => {
       { name: "Men's Haircut", price: 35, duration_minutes: 30 },
       { name: 'Beard Trim',    price: 20, duration_minutes: 20 },
     ]);
-    expect(result).toBe("- Men's Haircut – $35 (30 min)\n- Beard Trim – $20 (20 min)");
+    expect(result).toBe("- Men's Haircut, thirty-five dollars, thirty minutes\n- Beard Trim, twenty dollars, twenty minutes");
   });
 
   test('skips entries with no name', () => {
     expect(formatServices([{ name: "Men's Haircut", price: 35 }, { price: 20 }]))
-      .toBe("- Men's Haircut – $35");
+      .toBe("- Men's Haircut, thirty-five dollars");
+  });
+
+  test('price zero → "free"', () => {
+    expect(formatServices([{ name: 'Consultation', price: 0 }])).toBe('- Consultation, free');
+  });
+
+  test('round dollar amounts spoken naturally', () => {
+    expect(formatServices([{ name: 'Colour', price: 100 }])).toBe('- Colour, one hundred dollars');
+    expect(formatServices([{ name: 'Highlights', price: 150 }])).toBe('- Highlights, one hundred fifty dollars');
+  });
+
+  test('hyphenated tens-and-ones', () => {
+    expect(formatServices([{ name: 'Cut', price: 45, duration_minutes: 45 }]))
+      .toBe('- Cut, forty-five dollars, forty-five minutes');
+  });
+
+  test('sixty minutes', () => {
+    expect(formatServices([{ name: 'Deep Condition', price: 60, duration_minutes: 60 }]))
+      .toBe('- Deep Condition, sixty dollars, sixty minutes');
+  });
+
+  test('ninety minutes', () => {
+    expect(formatServices([{ name: 'Full Service', price: 80, duration_minutes: 90 }]))
+      .toBe('- Full Service, eighty dollars, ninety minutes');
+  });
+
+  test('duration only (no price)', () => {
+    expect(formatServices([{ name: 'Consultation', duration_minutes: 15 }]))
+      .toBe('- Consultation, fifteen minutes');
   });
 });
 

@@ -25,6 +25,7 @@ OPENING HOURS:
 
 SERVICES:
 {{services}}
+- Services are listed as: name, price in dollars, duration in minutes.
 - Only book services listed above. If a customer asks for something not on the list, suggest the closest available service.
 
 TEAM MEMBERS:

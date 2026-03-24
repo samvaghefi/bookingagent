@@ -47,16 +47,43 @@ function formatBusinessHours(businessHours) {
   return lines.length ? lines.join('\n') : '(Hours not configured yet)';
 }
 
-// Format a services array into a human-readable bullet list.
+// Convert an integer to spoken English words (supports 0–999).
+const _ONES = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
+               'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+               'seventeen', 'eighteen', 'nineteen'];
+const _TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+
+function numberToWords(n) {
+  const num = Math.round(n);
+  if (num === 0) return 'zero';
+  if (num < 20)  return _ONES[num];
+  if (num < 100) {
+    const t = Math.floor(num / 10), o = num % 10;
+    return o === 0 ? _TENS[t] : `${_TENS[t]}-${_ONES[o]}`;
+  }
+  if (num < 1000) {
+    const h = Math.floor(num / 100), rest = num % 100;
+    return rest === 0
+      ? `${_ONES[h]} hundred`
+      : `${_ONES[h]} hundred ${numberToWords(rest)}`;
+  }
+  return String(num); // fallback
+}
+
+// Format a services array into TTS-friendly spoken language for Vapi.
+// e.g. "- Beard Trim, twenty dollars, twenty minutes"
 function formatServices(services) {
   if (!Array.isArray(services) || services.length === 0) return '(No services configured yet)';
   const lines = services
     .filter(s => s && s.name)
     .map(s => {
       let line = `- ${s.name}`;
-      if (s.price != null)       line += ` – $${parseFloat(s.price).toFixed(0)}`;
-      if (s.duration_minutes)    line += ` (${s.duration_minutes} min)`;
-      if (s.description)         line += ` — ${s.description}`;
+      if (s.price != null) {
+        const dollars = parseFloat(s.price);
+        line += dollars === 0 ? ', free' : `, ${numberToWords(dollars)} dollars`;
+      }
+      if (s.duration_minutes) line += `, ${numberToWords(s.duration_minutes)} minutes`;
+      if (s.description)      line += ` — ${s.description}`;
       return line;
     });
   return lines.length ? lines.join('\n') : '(No services configured yet)';
