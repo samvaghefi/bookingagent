@@ -22,6 +22,10 @@ const SKIP_PATHS = [
   '/auth/dashboard/callback',
   '/auth/dashboard/login',
   '/auth/logout',
+  '/auth/login',
+  '/auth/forgot-password',
+  '/auth/forgot-password-page',
+  '/auth/reset-password',
   '/api/businesses',   // legacy internal endpoints (secured at network level)
 ];
 

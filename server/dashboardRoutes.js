@@ -6,6 +6,7 @@ const depositService = require('./depositService');
 const QRCode = require('qrcode');
 const queueService = require('./queueService');
 const { rebuildAndPatchVapiPrompt } = require('./vapiService');
+const bcrypt = require('bcryptjs');
 
 const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://bookingagent-gmo2.onrender.com';
 
@@ -900,6 +901,55 @@ router.post('/api/queue/:id/remove', async (req, res) => {
   } catch (err) {
     console.error('POST /api/queue/:id/remove error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Password management ────────────────────────────────────────────────────────
+
+// POST /api/auth/change-password — change password for authenticated user
+router.post('/api/auth/change-password', async (req, res) => {
+  const { currentPassword, newPassword, confirmPassword } = req.body;
+
+  if (!currentPassword || !newPassword || !confirmPassword) {
+    return res.status(400).json({ error: 'currentPassword, newPassword, and confirmPassword are required' });
+  }
+
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ error: 'New password and confirmation do not match' });
+  }
+
+  try {
+    // Fetch the full business row (req.business from authMiddleware may not include password_hash)
+    const { data: business, error } = await supabase
+      .from('businesses')
+      .select('id, email, password_hash')
+      .eq('id', req.business.id)
+      .single();
+
+    if (error || !business) throw error || new Error('Business not found');
+
+    if (!business.password_hash) {
+      return res.status(400).json({ error: 'No password set — this account uses Google sign-in' });
+    }
+
+    const match = await bcrypt.compare(currentPassword, business.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    const { error: updateError } = await supabase
+      .from('businesses')
+      .update({ password_hash: hash })
+      .eq('id', business.id);
+
+    if (updateError) throw updateError;
+
+    console.log(`🔑 Password changed for business ${business.id}`);
+    return res.json({ message: 'Password updated successfully' });
+  } catch (err) {
+    console.error('POST /api/auth/change-password error:', err.message);
+    return res.status(500).json({ error: err.message });
   }
 });
 

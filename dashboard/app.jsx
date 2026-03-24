@@ -1228,7 +1228,108 @@ function SettingsPage({ setPage }) {
         </div>
       </div>
 
+      {/* ── Change Password ── */}
+      <ChangePasswordCard />
 
+    </div>
+  );
+}
+
+// ── Change Password Card ───────────────────────────────────────────────────────
+function ChangePasswordCard() {
+  const [currentPassword, setCurrentPassword] = React.useState('');
+  const [newPassword,     setNewPassword]     = React.useState('');
+  const [confirmPassword, setConfirmPassword] = React.useState('');
+  const [saving,          setSaving]          = React.useState(false);
+  const [msg,             setMsg]             = React.useState(null); // { type: 'success'|'error', text }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setMsg(null);
+
+    if (newPassword !== confirmPassword) {
+      setMsg({ type: 'error', text: 'New password and confirmation do not match.' });
+      return;
+    }
+    if (newPassword.length < 8) {
+      setMsg({ type: 'error', text: 'New password must be at least 8 characters.' });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res  = await apiFetch('/api/auth/change-password', {
+        method: 'POST',
+        body:   JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setMsg({ type: 'success', text: 'Password updated successfully.' });
+        setCurrentPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } else {
+        setMsg({ type: 'error', text: data.error || 'Failed to update password.' });
+      }
+    } catch {
+      setMsg({ type: 'error', text: 'Network error. Please try again.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-header">Change Password</div>
+      <form onSubmit={handleSubmit} style={{ maxWidth: 400 }}>
+        <div className="form-group">
+          <label>Current password</label>
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={e => setCurrentPassword(e.target.value)}
+            placeholder="Your current password"
+            required
+            autoComplete="current-password"
+          />
+        </div>
+        <div className="form-group">
+          <label>New password</label>
+          <input
+            type="password"
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            placeholder="At least 8 characters"
+            required
+            minLength={8}
+            autoComplete="new-password"
+          />
+        </div>
+        <div className="form-group">
+          <label>Confirm new password</label>
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            placeholder="Repeat your new password"
+            required
+            minLength={8}
+            autoComplete="new-password"
+          />
+        </div>
+        {msg && (
+          <div className={`save-msg ${msg.type}`} style={{ display: 'block', marginBottom: 12 }}>
+            {msg.text}
+          </div>
+        )}
+        <button type="submit" className="btn-primary" disabled={saving}>
+          {saving ? 'Saving…' : 'Update Password'}
+        </button>
+      </form>
+      <p className="card-note" style={{ marginTop: 10 }}>
+        If you signed up with Google, set a password first via{' '}
+        <a href="/auth/forgot-password-page" style={{ color: '#534AB7' }}>Forgot password</a>.
+      </p>
     </div>
   );
 }

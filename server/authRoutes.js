@@ -1,7 +1,11 @@
 const express = require('express');
 const { google } = require('googleapis');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const sgMail = require('@sendgrid/mail');
 const { createClient } = require('@supabase/supabase-js');
+
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 const router = express.Router();
 
@@ -195,11 +199,95 @@ router.get('/auth/dashboard/login', (req, res) => {
     }
     .btn-google:active { transform: translateY(0); }
 
+    .or-divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 20px 0;
+      color: #9ca3af;
+      font-size: 13px;
+    }
+    .or-divider::before, .or-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #e5e7eb;
+    }
+
+    label { display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+    .field { margin-bottom: 16px; }
+    input[type=email], input[type=password] {
+      width: 100%;
+      padding: 11px 14px;
+      border: 1.5px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.15s;
+      color: #111827;
+    }
+    input[type=email]:focus, input[type=password]:focus { border-color: #534AB7; }
+
+    .btn-submit {
+      width: 100%;
+      height: 52px;
+      background: #534AB7;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      margin-top: 4px;
+    }
+    .btn-submit:hover { background: #4338b0; transform: translateY(-1px); }
+    .btn-submit:active { transform: translateY(0); }
+
+    .forgot-link {
+      display: block;
+      text-align: right;
+      font-size: 13px;
+      color: #6b7280;
+      text-decoration: none;
+      margin-top: -10px;
+      margin-bottom: 16px;
+    }
+    .forgot-link:hover { color: #534AB7; }
+
+    .btn-apple {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      width: 100%;
+      height: 52px;
+      background: #f3f4f6;
+      color: #9ca3af;
+      border: 1.5px solid #e5e7eb;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: default;
+      margin-top: 12px;
+    }
+
+    .form-error {
+      background: #fef2f2;
+      border: 1.5px solid #fca5a5;
+      color: #b91c1c;
+      border-radius: 8px;
+      padding: 11px 14px;
+      font-size: 14px;
+      margin-bottom: 16px;
+      display: none;
+    }
+
     .divider {
       text-align: center;
       font-size: 14px;
       color: #9ca3af;
-      margin: 28px 0 20px;
+      margin: 24px 0 16px;
     }
 
     .signup-link {
@@ -339,11 +427,71 @@ router.get('/auth/dashboard/login', (req, res) => {
         Sign in with Google
       </a>
 
+      <div class="or-divider">or</div>
+
+      <form id="email-form" novalidate>
+        <div class="form-error" id="form-error"></div>
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" required>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" placeholder="Your password" autocomplete="current-password" required>
+        </div>
+        <a href="/auth/forgot-password-page" class="forgot-link">Forgot password?</a>
+        <button type="submit" class="btn-submit" id="login-btn">Sign In</button>
+      </form>
+
+      <div class="btn-apple">
+        <svg width="16" height="16" viewBox="0 0 814 1000" xmlns="http://www.w3.org/2000/svg" fill="#9ca3af">
+          <path d="M788.1 340.9c-5.8 4.5-108.2 62.2-108.2 190.5 0 148.4 130.3 200.9 134.2 202.2-.6 3.2-20.7 71.9-68.7 141.9-42.8 61.6-87.5 123.1-155.5 123.1s-85.5-39.5-164-39.5c-76 0-103.7 40.8-165.9 40.8s-105-57.8-155.5-127.4C46 411.1 0 309.2 0 208.6C0 94.7 57.3 38.7 108.2 38.7c50.9 0 81.6 33.4 154.3 33.4 70.7 0 106-38.7 162.3-38.7 66.9 0 116.5 71.9 116.5 71.9s-68.7 41.9-68.7 138.6c0 96.7 68.7 138.5 68.7 138.5z"/>
+        </svg>
+        Sign in with Apple — coming soon
+      </div>
+
       <div class="divider">Don't have an account?</div>
       <a href="https://bimblyai.com/signup" class="signup-link">Start your free 30-day trial →</a>
 
     </div>
   </div>
+
+  <script>
+    const DASHBOARD = 'https://bookingagent-gmo2.onrender.com/dashboard';
+    document.getElementById('email-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('form-error');
+      const btn   = document.getElementById('login-btn');
+      errEl.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Signing in…';
+
+      const email    = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+
+      try {
+        const res  = await fetch('/auth/login', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ email, password }),
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+          window.location.href = DASHBOARD + '/?token=' + data.token;
+        } else {
+          errEl.textContent   = data.error || 'Sign in failed. Please try again.';
+          errEl.style.display = 'block';
+          btn.disabled        = false;
+          btn.textContent     = 'Sign In';
+        }
+      } catch {
+        errEl.textContent   = 'Network error. Please try again.';
+        errEl.style.display = 'block';
+        btn.disabled        = false;
+        btn.textContent     = 'Sign In';
+      }
+    });
+  </script>
 
   <!-- Right: Social proof -->
   <div class="social-panel">
@@ -386,6 +534,317 @@ router.get('/auth/dashboard/login', (req, res) => {
 // GET /auth/logout — redirect to dashboard login
 router.get('/auth/logout', (req, res) => {
   res.redirect(`${DASHBOARD_URL}/login`);
+});
+
+// GET /auth/forgot-password-page — serve the forgot-password form
+router.get('/auth/forgot-password-page', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forgot Password — Bimbly</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f9fafb; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
+    .card { background: #fff; border-radius: 16px; padding: 40px; width: 100%; max-width: 420px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+    h1 { font-size: 24px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+    p.sub { font-size: 15px; color: #6b7280; margin-bottom: 28px; line-height: 1.5; }
+    label { display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+    input { width: 100%; padding: 12px 14px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 15px; outline: none; transition: border-color 0.15s; color: #111827; }
+    input:focus { border-color: #534AB7; }
+    .field { margin-bottom: 18px; }
+    button { width: 100%; padding: 13px; background: #534AB7; color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+    button:hover { background: #4338b0; }
+    .back { display: block; text-align: center; margin-top: 16px; font-size: 14px; color: #6b7280; text-decoration: none; }
+    .back:hover { color: #534AB7; }
+    .msg { margin-top: 16px; padding: 12px 16px; border-radius: 8px; font-size: 14px; display: none; }
+    .msg--success { background: #f0fdf4; border: 1.5px solid #86efac; color: #166534; }
+    .msg--error   { background: #fef2f2; border: 1.5px solid #fca5a5; color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Forgot your password?</h1>
+    <p class="sub">Enter your email and we'll send you a link to reset your password.</p>
+    <form id="form">
+      <div class="field">
+        <label for="email">Email address</label>
+        <input type="email" id="email" placeholder="you@example.com" required autocomplete="email">
+      </div>
+      <button type="submit" id="btn">Send reset link</button>
+      <div class="msg msg--success" id="ok">Check your inbox — a reset link is on its way.</div>
+      <div class="msg msg--error"   id="err"></div>
+    </form>
+    <a href="/auth/dashboard/login" class="back">← Back to sign in</a>
+  </div>
+  <script>
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const ok  = document.getElementById('ok');
+      const err = document.getElementById('err');
+      const btn = document.getElementById('btn');
+      ok.style.display  = 'none';
+      err.style.display = 'none';
+      btn.disabled    = true;
+      btn.textContent = 'Sending…';
+
+      try {
+        const res = await fetch('/auth/forgot-password', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ email: document.getElementById('email').value.trim() }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          ok.style.display = 'block';
+          document.getElementById('form').querySelector('button').style.display = 'none';
+        } else {
+          err.textContent   = data.error || 'Something went wrong.';
+          err.style.display = 'block';
+          btn.disabled      = false;
+          btn.textContent   = 'Send reset link';
+        }
+      } catch {
+        err.textContent   = 'Network error. Please try again.';
+        err.style.display = 'block';
+        btn.disabled      = false;
+        btn.textContent   = 'Send reset link';
+      }
+    });
+  </script>
+</body>
+</html>`);
+});
+
+// ── Email / password auth routes ─────────────────────────────────────────────
+
+// POST /auth/login — email + password → JWT
+router.post('/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  try {
+    const { data: business, error } = await supabase
+      .from('businesses')
+      .select('id, email, name, password_hash, is_active')
+      .eq('email', email)
+      .single();
+
+    if (error || !business) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    if (!business.password_hash) {
+      return res.status(401).json({ error: 'No password set — please sign in with Google' });
+    }
+
+    const match = await bcrypt.compare(password, business.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    const token = jwt.sign(
+      { businessId: business.id, email: business.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    console.log(`✅ Email/password login: ${business.name} (${email})`);
+    return res.json({ token });
+  } catch (err) {
+    console.error('❌ /auth/login error:', err.message);
+    return res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// POST /auth/forgot-password — send reset link via email
+router.post('/auth/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  try {
+    const { data: business } = await supabase
+      .from('businesses')
+      .select('id, email, name')
+      .eq('email', email)
+      .single();
+
+    // Always return 200 to avoid email enumeration
+    if (!business) {
+      return res.json({ message: 'If that email exists, a reset link has been sent' });
+    }
+
+    const resetToken = jwt.sign(
+      { email: business.email, purpose: 'password-reset' },
+      process.env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    const base = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
+    const resetLink = `${base}/auth/reset-password?token=${resetToken}`;
+
+    await sgMail.send({
+      to:      business.email,
+      from:    { email: 'hello@bimblyai.com', name: 'Bimbly' },
+      subject: 'Reset your Bimbly password',
+      text:    `Hi ${business.name},\n\nClick the link below to reset your password. This link expires in 1 hour.\n\n${resetLink}\n\nIf you didn't request this, you can ignore this email.\n\n— The Bimbly Team`,
+      html:    `<p>Hi ${business.name},</p><p>Click the link below to reset your password. This link expires in 1 hour.</p><p><a href="${resetLink}">Reset my password</a></p><p>If you didn't request this, you can ignore this email.</p><p>— The Bimbly Team</p>`,
+    });
+
+    console.log(`📧 Password reset email sent to ${email}`);
+    return res.json({ message: 'If that email exists, a reset link has been sent' });
+  } catch (err) {
+    console.error('❌ /auth/forgot-password error:', err.message);
+    return res.status(500).json({ error: 'Failed to send reset email' });
+  }
+});
+
+// GET /auth/reset-password — serve the reset-password form page
+router.get('/auth/reset-password', (req, res) => {
+  const { token } = req.query;
+  const base = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
+
+  // Validate token before rendering the form
+  if (!token) {
+    return res.redirect(`/auth/dashboard/login?error=auth_failed`);
+  }
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.purpose !== 'password-reset') {
+      return res.redirect(`/auth/dashboard/login?error=auth_failed`);
+    }
+  } catch {
+    return res.redirect(`/auth/dashboard/login?error=auth_failed`);
+  }
+
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reset Password — Bimbly</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f9fafb; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px; }
+    .card { background: #fff; border-radius: 16px; padding: 40px; width: 100%; max-width: 420px; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+    h1 { font-size: 24px; font-weight: 700; color: #111827; margin-bottom: 8px; }
+    p.sub { font-size: 15px; color: #6b7280; margin-bottom: 28px; }
+    label { display: block; font-size: 14px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+    input { width: 100%; padding: 12px 14px; border: 1.5px solid #d1d5db; border-radius: 8px; font-size: 15px; outline: none; transition: border-color 0.15s; }
+    input:focus { border-color: #534AB7; }
+    .field { margin-bottom: 18px; }
+    button { width: 100%; padding: 13px; background: #534AB7; color: #fff; border: none; border-radius: 10px; font-size: 16px; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+    button:hover { background: #4338b0; }
+    .msg { margin-top: 16px; padding: 12px 16px; border-radius: 8px; font-size: 14px; display: none; }
+    .msg--success { background: #f0fdf4; border: 1.5px solid #86efac; color: #166534; }
+    .msg--error   { background: #fef2f2; border: 1.5px solid #fca5a5; color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Reset your password</h1>
+    <p class="sub">Enter a new password for your Bimbly account.</p>
+    <form id="form">
+      <div class="field">
+        <label for="password">New password</label>
+        <input type="password" id="password" placeholder="At least 8 characters" required minlength="8">
+      </div>
+      <div class="field">
+        <label for="confirm">Confirm new password</label>
+        <input type="password" id="confirm" placeholder="Repeat your new password" required minlength="8">
+      </div>
+      <button type="submit" id="btn">Reset password</button>
+      <div class="msg msg--success" id="ok">Password reset! <a href="/auth/dashboard/login">Sign in →</a></div>
+      <div class="msg msg--error"   id="err"></div>
+    </form>
+  </div>
+  <script>
+    document.getElementById('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('password').value;
+      const confirm  = document.getElementById('confirm').value;
+      const ok       = document.getElementById('ok');
+      const err      = document.getElementById('err');
+      const btn      = document.getElementById('btn');
+
+      ok.style.display  = 'none';
+      err.style.display = 'none';
+
+      if (password !== confirm) {
+        err.textContent   = 'Passwords do not match.';
+        err.style.display = 'block';
+        return;
+      }
+
+      btn.disabled    = true;
+      btn.textContent = 'Resetting…';
+
+      try {
+        const res = await fetch('/auth/reset-password', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ token: '${token}', password }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          ok.style.display      = 'block';
+          document.getElementById('form').querySelector('button').style.display = 'none';
+        } else {
+          err.textContent   = data.error || 'Something went wrong.';
+          err.style.display = 'block';
+          btn.disabled      = false;
+          btn.textContent   = 'Reset password';
+        }
+      } catch {
+        err.textContent   = 'Network error. Please try again.';
+        err.style.display = 'block';
+        btn.disabled      = false;
+        btn.textContent   = 'Reset password';
+      }
+    });
+  </script>
+</body>
+</html>`);
+});
+
+// POST /auth/reset-password — verify reset token and update password_hash
+router.post('/auth/reset-password', async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) {
+    return res.status(400).json({ error: 'Token and new password are required' });
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, process.env.JWT_SECRET);
+  } catch (err) {
+    return res.status(400).json({ error: 'Invalid or expired reset token' });
+  }
+
+  if (decoded.purpose !== 'password-reset') {
+    return res.status(400).json({ error: 'Invalid reset token' });
+  }
+
+  try {
+    const hash = await bcrypt.hash(password, 10);
+    const { error } = await supabase
+      .from('businesses')
+      .update({ password_hash: hash })
+      .eq('email', decoded.email);
+
+    if (error) throw error;
+
+    console.log(`🔑 Password reset for ${decoded.email}`);
+    return res.json({ message: 'Password reset successfully' });
+  } catch (err) {
+    console.error('❌ /auth/reset-password error:', err.message);
+    return res.status(500).json({ error: 'Failed to reset password' });
+  }
 });
 
 module.exports = router;
