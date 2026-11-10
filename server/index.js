@@ -1158,6 +1158,27 @@ app.get('/admin/vapi-template', async (req, res) => {
   }
 });
 
+// ── POST /admin/resend-welcome ────────────────────────────────────────────────
+// Re-sends the welcome email for one business (e.g. after an email outage).
+// Header: x-admin-key = ADMIN_SECRET. Body: { "businessId": "..." } or { "email": "..." }
+app.post('/admin/resend-welcome', express.json(), async (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!process.env.ADMIN_SECRET || adminKey !== process.env.ADMIN_SECRET) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const { businessId, email } = req.body || {};
+  if (!businessId && !email) return res.status(400).json({ error: 'businessId or email is required' });
+
+  let query = supabase.from('businesses').select('*');
+  query = businessId ? query.eq('id', businessId) : query.eq('email', String(email).trim().toLowerCase());
+  const { data: business, error } = await query.single();
+  if (error || !business) return res.status(404).json({ error: 'Business not found' });
+  if (!business.is_active) return res.status(409).json({ error: 'Business has not completed checkout' });
+
+  const sent = await sendWelcomeEmail(business);
+  return res.status(sent ? 200 : 502).json({ sent, to: business.email });
+});
+
 // ── POST /admin/test-provisioning ─────────────────────────────────────────────
 // Bypasses Stripe and tests the full Twilio + Vapi provisioning chain.
 // Requires header: x-admin-key matching ADMIN_SECRET env var.

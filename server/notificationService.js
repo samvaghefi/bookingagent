@@ -8,7 +8,7 @@ const twilioClient = twilio(
 
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-const FROM = { email: 'hello@bimblyai.com', name: 'bimblyai' };
+const FROM = { email: 'hello@bimblyai.com', name: 'Bimbly' };
 
 const PLAN_LABELS = {
   solo:    'Solo (CA$39/mo)',
@@ -82,102 +82,156 @@ async function sendOwnerEmail(business, bookingOrSubject, alertText) {
 }
 
 // ── sendWelcomeEmail ──────────────────────────────────────────────────────────
-// HTML welcome email sent after checkout completes.
-// Includes provisioned Twilio phone number and dashboard link.
-async function sendWelcomeEmail(business) {
-  const ownerName  = business.owner_name || business.name;
-  const label      = planLabel(business.plan);
-  const phone      = business.twilio_phone || '(being provisioned)';
-  const dashUrl    = 'https://bookingagent-gmo2.onrender.com/dashboard';
+// Sent after checkout completes. Main job: tell the owner how to sign in
+// (Google, or the email + password they chose) and link to the sign-in page.
+// Styled to match bimblyai.com. Table layout + inline styles for email clients;
+// PNG logo because Gmail/Outlook don't render SVG.
+const SIGN_IN_URL  = 'https://bookingagent-gmo2.onrender.com/auth/dashboard/login';
+const EMAIL_LOGO   = 'https://bimblyai.com/assets/bimblyai-logo-email.png';
+const PLAN_PRICES  = { solo: ['Solo', 39], starter: ['Starter', 99], pro: ['Pro', 199] };
 
-  // Format trial end date if available
-  let trialNote = 'Your 30-day free trial has started.';
-  if (business.trial_ends_at) {
-    const trialEnd = new Date(business.trial_ends_at).toLocaleDateString('en-CA', {
-      year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Toronto',
-    });
-    trialNote = `Your 30-day free trial has started. No charges until <strong>${trialEnd}</strong>.`;
-  }
+function escapeHtml(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// "+14165550123" → "(416) 555-0123"; anything else is returned as-is
+function formatNaPhone(e164) {
+  const m = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164 || '');
+  return m ? `(${m[1]}) ${m[2]}-${m[3]}` : (e164 || '');
+}
+
+function buildWelcomeEmail(business) {
+  const firstName = String(business.owner_name || '').trim().split(/\s+/)[0] || 'there';
+  const shop      = business.name || 'your shop';
+  const email     = business.email;
+  const usesGoogle = !business.password_hash;
+  const [planName, planPrice] = PLAN_PRICES[business.plan] || PLAN_PRICES.solo;
+  const phone     = business.twilio_phone ? formatNaPhone(business.twilio_phone) : null;
+  const trialEnd  = business.trial_ends_at
+    ? new Date(business.trial_ends_at).toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'America/Toronto' })
+    : null;
+
+  const howHtml = usesGoogle
+    ? `Choose <strong>Sign in with Google</strong> and pick <strong>${escapeHtml(email)}</strong>.`
+    : `Sign in with your email, <strong>${escapeHtml(email)}</strong>, and the password you created.`;
+  const howText = usesGoogle
+    ? `Choose "Sign in with Google" and pick ${email}.`
+    : `Sign in with your email, ${email}, and the password you created.`;
+  const trialHtml = trialEnd
+    ? `Your 30-day free trial runs until <strong>${escapeHtml(trialEnd)}</strong>. Nothing is charged before then.`
+    : `Your 30-day free trial has started. Nothing is charged for 30 days.`;
+  const trialText = trialEnd
+    ? `Your 30-day free trial runs until ${trialEnd}. Nothing is charged before then.`
+    : `Your 30-day free trial has started. Nothing is charged for 30 days.`;
+
+  const ink = '#2346C8', inkDeep = '#1A36A0', graphite = '#2C2D33', grey = '#575963', rule = '#D3DFEB', paper = '#FAFBF9', sheet = '#FEFEFC';
+  const font = "'Atkinson Hyperlegible Next', 'Atkinson Hyperlegible', -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+  const display = "'Schibsted Grotesk', 'Helvetica Neue', Helvetica, Arial, sans-serif";
+
+  const row = (label, value) => `
+          <tr>
+            <td style="padding:12px 0;border-top:1px solid ${rule};font:700 14px/1.4 ${font};color:${grey};width:42%;vertical-align:top;">${label}</td>
+            <td style="padding:12px 0;border-top:1px solid ${rule};font:400 15px/1.4 ${font};color:${graphite};vertical-align:top;">${value}</td>
+          </tr>`;
 
   const html = `<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"></head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:system-ui,-apple-system,sans-serif;">
-  <div style="max-width:600px;margin:0 auto;padding:24px 16px;">
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>Welcome to Bimbly</title>
+</head>
+<body style="margin:0;padding:0;background:${paper};">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your account for ${escapeHtml(shop)} is ready. Here's how to sign in.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${paper};">
+    <tr><td align="center" style="padding:32px 16px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;">
+        <tr><td style="padding:0 4px 24px;">
+          <a href="https://bimblyai.com"><img src="${EMAIL_LOGO}" width="166" height="40" alt="Bimblyai" style="display:block;border:0;"></a>
+        </td></tr>
+        <tr><td style="background:${sheet};border:1px solid #A9BED5;border-left:4px solid ${ink};border-radius:4px 10px 10px 4px;padding:32px 28px;">
 
-    <!-- Header -->
-    <div style="background:#0f172a;border-radius:8px 8px 0 0;padding:20px 28px;display:flex;justify-content:space-between;align-items:center;">
-      <img src="https://bimblyai.com/assets/bimblyai-logo-primary.svg" alt="bimblyai" style="height:40px;display:block;">
-    </div>
+          <h1 style="margin:0 0 16px;font:800 28px/1.1 ${display};letter-spacing:-0.5px;color:${graphite};">Welcome to Bimbly, ${escapeHtml(firstName)}.</h1>
+          <p style="margin:0 0 24px;font:400 16px/1.55 ${font};color:${graphite};">
+            Your account for <strong>${escapeHtml(shop)}</strong> is ready. ${trialHtml}
+          </p>
 
-    <!-- Body -->
-    <div style="background:#ffffff;border-radius:0 0 8px 8px;padding:32px 28px;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 12px;">
+            <tr><td style="border-radius:6px;background:${ink};">
+              <a href="${SIGN_IN_URL}" style="display:inline-block;padding:15px 28px;font:700 16px/1 ${display};color:#ffffff;text-decoration:none;border-radius:6px;">Sign in to Bimbly</a>
+            </td></tr>
+          </table>
+          <p style="margin:0 0 28px;font:400 15px/1.5 ${font};color:${grey};">${howHtml}</p>
 
-      <p style="font-size:16px;color:#111827;margin:0 0 20px;">Hi ${ownerName},</p>
+          <h2 style="margin:0 0 10px;font:800 18px/1.2 ${display};color:${graphite};">What to do next</h2>
+          <ol style="margin:0 0 28px;padding:0 0 0 20px;font:400 15px/1.6 ${font};color:${graphite};">
+            <li style="margin-bottom:6px;">Sign in using the button above.</li>
+            <li style="margin-bottom:6px;">The setup wizard walks you through your services, hours and team. It takes about 15 minutes.</li>
+            <li>When setup is done, Bimbly is ready to answer your calls and book appointments.</li>
+          </ol>
 
-      <p style="font-size:14px;color:#374151;line-height:1.6;margin:0 0 24px;">
-        Your AI receptionist is live. Here's everything you need to get started.
-      </p>
-
-      <!-- Phone number box -->
-      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:20px 24px;margin-bottom:24px;">
-        <div style="font-size:11px;font-weight:700;color:#16a34a;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Your AI Receptionist Number</div>
-        <div style="font-size:28px;font-weight:700;color:#111827;letter-spacing:0.02em;margin-bottom:10px;">${phone}</div>
-        <div style="font-size:13px;color:#374151;line-height:1.5;">
-          This is your AI receptionist number. Log into your dashboard to complete setup and go live.
-        </div>
-      </div>
-
-      <!-- Plan -->
-      <div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;margin-bottom:24px;">
-        <div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:4px;">Your Plan</div>
-        <div style="font-size:15px;font-weight:600;color:#111827;">${label}</div>
-        <div style="font-size:13px;color:#6b7280;margin-top:4px;">${trialNote}</div>
-      </div>
-
-      <!-- Next steps -->
-      <div style="margin-bottom:24px;">
-        <div style="font-size:13px;font-weight:700;color:#111827;margin-bottom:10px;">Next steps</div>
-        <div style="font-size:13px;color:#374151;line-height:1.8;">
-          1. Log into your <a href="${dashUrl}" style="color:#2563eb;text-decoration:none;font-weight:600;">dashboard</a> to complete your setup<br>
-          2. The setup wizard will walk you through your services, hours, and team<br>
-          3. Once setup is complete your AI receptionist will be ready to take calls
-        </div>
-      </div>
-
-      <!-- Dashboard link -->
-      <div style="text-align:center;margin-bottom:28px;">
-        <a href="${dashUrl}" style="background:#0f172a;color:#ffffff;font-size:14px;font-weight:600;padding:12px 28px;border-radius:6px;display:inline-block;text-decoration:none;">
-          Open Dashboard
-        </a>
-      </div>
-
-      <p style="font-size:13px;color:#6b7280;line-height:1.6;margin:0;">
-        Questions? Reply to this email or reach us at
-        <a href="mailto:hello@bimblyai.com" style="color:#2563eb;text-decoration:none;">hello@bimblyai.com</a>
-      </p>
-    </div>
-
-    <!-- Footer -->
-    <div style="text-align:center;padding:16px;font-size:11px;color:#9ca3af;">
-      bimblyai &middot; Every call answered. Every booking captured.
-    </div>
-  </div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 8px;">
+            ${phone ? row('Your Bimbly number', `<strong style="font-size:17px;color:${inkDeep};">${escapeHtml(phone)}</strong>`) : ''}
+            ${row('Your plan', `${planName}, CA$${planPrice}/month after your trial`)}
+            ${row('Sign-in email', escapeHtml(email))}
+          </table>
+        </td></tr>
+        <tr><td style="padding:24px 4px 0;font:400 14px/1.6 ${font};color:${grey};">
+          Questions? Just reply to this email, or write to <a href="mailto:hello@bimblyai.com" style="color:${inkDeep};">hello@bimblyai.com</a>.
+          A real person reads every message.
+        </td></tr>
+        <tr><td style="padding:20px 4px 0;font:400 12px/1.6 ${font};color:#8A8C95;">
+          Bimbly, the AI receptionist for barbershops and salons. Made in Toronto.<br>
+          You're getting this because you created a Bimbly account with ${escapeHtml(email)}.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
 </body>
 </html>`;
 
+  const text = [
+    `Welcome to Bimbly, ${firstName}.`,
+    '',
+    `Your account for ${shop} is ready. ${trialText}`,
+    '',
+    `Sign in here: ${SIGN_IN_URL}`,
+    howText,
+    '',
+    'What to do next:',
+    '1. Sign in using the link above.',
+    '2. The setup wizard walks you through your services, hours and team. It takes about 15 minutes.',
+    '3. When setup is done, Bimbly is ready to answer your calls and book appointments.',
+    '',
+    phone ? `Your Bimbly number: ${phone}` : null,
+    `Your plan: ${planName}, CA$${planPrice}/month after your trial`,
+    `Sign-in email: ${email}`,
+    '',
+    'Questions? Reply to this email or write to hello@bimblyai.com.',
+  ].filter(l => l !== null).join('\n');
+
+  return { subject: `Welcome to Bimbly. Here's how to sign in`, html, text };
+}
+
+async function sendWelcomeEmail(business) {
+  const { subject, html, text } = buildWelcomeEmail(business);
   try {
     await sgMail.send({
       to: business.email,
       from: FROM,
-      subject: 'Welcome to bimblyai — your AI receptionist is ready',
+      replyTo: 'hello@bimblyai.com',
+      subject,
       html,
-      text: `Hi ${ownerName},\n\nYour AI receptionist number is: ${phone}\n\nLog into your dashboard to complete setup and go live: ${dashUrl}\n\nQuestions? hello@bimblyai.com`,
+      text,
     });
     console.log(`📧 Welcome email sent to ${business.email}`);
     return true;
   } catch (error) {
-    console.error('Welcome email error:', error);
+    const detail = error.response?.body?.errors?.map(e => e.message).join('; ');
+    console.error(`Welcome email error (${error.code || 'no code'}): ${error.message}${detail ? ' | ' + detail : ''}`);
     return false;
   }
 }
@@ -333,6 +387,7 @@ module.exports = {
   sendCustomerSMS,
   sendOwnerEmail,
   sendWelcomeEmail,
+  buildWelcomeEmail,
   sendInternalSignupNotification,
   sendPaymentFailedEmail,
   sendDepositSMS,
