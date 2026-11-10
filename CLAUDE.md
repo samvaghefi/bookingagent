@@ -78,10 +78,13 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - To reconnect: https://bookingagent-gmo2.onrender.com/auth/google?businessId=a09fdd0b-421e-479a-b4d7-120f6a72a043
 
 ## Dashboard Auth
-- Login page: GET /auth/dashboard/login — split-screen branded page (60% form, 40% social proof)
-  - no_account error: coral banner "Did you mean to sign up?" with link to bimblyai.com/signup
-  - auth_failed error: plain red banner
-  - Google OAuth sign-in button + "Start your free trial" link
+- Login page: GET /auth/dashboard/login — matches bimblyai.com design ("the book fills itself"); form left, example appointment book right (hidden on mobile)
+  - Shared styles/fonts/logo for login, forgot-password and reset-password pages: server/authPageStyles.js (authHead(), LOGO)
+  - Logo/favicon files served from dashboard/brand/ (copies of the website's assets)
+  - Error banners: no_account, no_email, auth_failed
+  - Google sign-in, email/password form, "Start your free trial" link. No testimonials or stats (none are real yet)
+- Emails are stored and matched lowercase everywhere (normalizeEmail() in signupValidation.js)
+- Password rules (8+, capital, number, special) apply to signup, reset-password and /api/auth/change-password
 - Flow: GET /auth/dashboard/google → Google OAuth → /auth/dashboard/callback
 - Callback looks up business by email, creates JWT (7d), redirects to dashboard?token=JWT
 - React app reads ?token= from URL, stores in localStorage as `bimbly_token`, strips from URL

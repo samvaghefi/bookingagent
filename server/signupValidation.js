@@ -52,7 +52,7 @@ function validateSignup(body = {}) {
 
   const businessName = str(body.businessName);
   const ownerName    = str(body.ownerName);
-  const email        = str(body.email);
+  const email        = str(body.email).toLowerCase(); // emails are stored and matched lowercase
   const password     = typeof body.password === 'string' ? body.password : '';
   const confirm      = typeof body.confirmPassword === 'string' ? body.confirmPassword : '';
   const businessType = str(body.businessType);
@@ -91,4 +91,9 @@ function validateSignup(body = {}) {
   };
 }
 
-module.exports = { validateSignup, passwordError, isValidEmail, normalizePhone, PASSWORD_RULES };
+// Emails are stored lowercase; use this on every lookup so case never matters.
+function normalizeEmail(email) {
+  return typeof email === 'string' ? email.trim().toLowerCase() : '';
+}
+
+module.exports = { normalizeEmail, validateSignup, passwordError, isValidEmail, normalizePhone, PASSWORD_RULES };

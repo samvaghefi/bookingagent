@@ -7,6 +7,7 @@ const QRCode = require('qrcode');
 const queueService = require('./queueService');
 const { rebuildAndPatchVapiPrompt } = require('./vapiService');
 const bcrypt = require('bcryptjs');
+const { passwordError } = require('./signupValidation');
 
 const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://bookingagent-gmo2.onrender.com';
 
@@ -916,6 +917,11 @@ router.post('/api/auth/change-password', async (req, res) => {
 
   if (newPassword !== confirmPassword) {
     return res.status(400).json({ error: 'New password and confirmation do not match' });
+  }
+
+  const pwErr = passwordError(newPassword);
+  if (pwErr) {
+    return res.status(400).json({ error: pwErr });
   }
 
   try {

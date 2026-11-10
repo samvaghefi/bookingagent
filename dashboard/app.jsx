@@ -1251,8 +1251,14 @@ function ChangePasswordCard() {
       setMsg({ type: 'error', text: 'New password and confirmation do not match.' });
       return;
     }
-    if (newPassword.length < 8) {
-      setMsg({ type: 'error', text: 'New password must be at least 8 characters.' });
+    const missing = [
+      newPassword.length < 8          && 'at least 8 characters',
+      !/[A-Z]/.test(newPassword)       && 'a capital letter',
+      !/[0-9]/.test(newPassword)       && 'a number',
+      !/[^A-Za-z0-9\s]/.test(newPassword) && 'a special character',
+    ].filter(Boolean);
+    if (missing.length) {
+      setMsg({ type: 'error', text: 'New password needs ' + missing.join(', ') + '.' });
       return;
     }
 
@@ -1304,6 +1310,7 @@ function ChangePasswordCard() {
             minLength={8}
             autoComplete="new-password"
           />
+          <p style={{ margin: '6px 0 0', fontSize: 13, color: '#6b7280' }}>At least 8 characters, with a capital letter, a number and a special character (like ! @ # $).</p>
         </div>
         <div className="form-group">
           <label>Confirm new password</label>

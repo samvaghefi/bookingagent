@@ -33,3 +33,8 @@ test('password_hash is null when none is given (admin test provisioning)', async
   await createBusiness({ businessName: 'Test', ownerName: 'T', email: 't@t.co', phone: '+14165550123', businessType: 'other' });
   expect(inserted[0].password_hash).toBeNull();
 });
+
+test('email is stored lowercase', async () => {
+  await createBusiness({ businessName: 'X', ownerName: 'X', email: ' Jay@FadeRoom.CA ', phone: '+14165550123', businessType: 'other' });
+  expect(inserted[0]).toMatchObject({ email: 'jay@faderoom.ca', billing_email: 'jay@faderoom.ca' });
+});

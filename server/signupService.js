@@ -37,7 +37,8 @@ async function findUniqueSlug(baseName) {
 // 2. Stripe webhook (checkout.session.completed) sets is_active: true, subscription_status: 'trial'
 // 3. Users cannot log in until is_active is true
 async function createBusiness(data) {
-  const { businessName, ownerName, email, phone, businessType, plan = 'solo', city, province, passwordHash } = data;
+  const { businessName, ownerName, phone, businessType, plan = 'solo', city, province, passwordHash } = data;
+  const email = typeof data.email === 'string' ? data.email.trim().toLowerCase() : data.email;
   const validPlan = ['solo', 'starter', 'pro'].includes(plan) ? plan : 'solo';
 
   // Check for existing business with this email

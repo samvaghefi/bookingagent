@@ -40,14 +40,17 @@ function chain(result) {
 
 // ── App factory ────────────────────────────────────────────────────────────────
 
+const eqCalls = [];
+
 function buildApp({ business = BUSINESS, sgSend = jest.fn().mockResolvedValue() } = {}) {
   jest.resetModules();
+  eqCalls.length = 0;
 
   jest.doMock('@supabase/supabase-js', () => ({
     createClient: () => ({
       from: () => ({
         select: () => ({
-          eq: () => ({
+          eq: (col, val) => (eqCalls.push([col, val]), {
             single:      () => Promise.resolve(business ? { data: business, error: null } : { data: null, error: { message: 'not found' } }),
             maybeSingle: () => Promise.resolve(business ? { data: business, error: null } : { data: null, error: null }),
           }),
@@ -291,6 +294,16 @@ describe('POST /api/auth/change-password', () => {
     expect(res.body.message).toMatch(/updated|success/i);
   });
 
+  test('400 when the new password breaks the rules', async () => {
+    const app = buildAuthApp();
+    const res = await request(app)
+      .post('/api/auth/change-password')
+      .send({ currentPassword: PASSWORD, newPassword: 'newsecure99', confirmPassword: 'newsecure99' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/capital letter/);
+  });
+
   test('401 for wrong current password', async () => {
     const app = buildAuthApp();
     const res = await request(app)
@@ -328,5 +341,32 @@ describe('POST /api/auth/change-password', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/no password|google/i);
+  });
+});
+
+// ── Email case and password rules ─────────────────────────────────────────────
+
+describe('email matching ignores case', () => {
+  test('login looks up the lowercased, trimmed email', async () => {
+    const { app } = buildApp();
+    const res = await request(app).post('/auth/login').send({ email: '  Sam@Example.COM ', password: PASSWORD });
+    expect(res.status).toBe(200);
+    expect(eqCalls).toContainEqual(['email', 'sam@example.com']);
+  });
+
+  test('forgot-password looks up the lowercased email', async () => {
+    const { app } = buildApp();
+    await request(app).post('/auth/forgot-password').send({ email: 'SAM@example.com' });
+    expect(eqCalls).toContainEqual(['email', 'sam@example.com']);
+  });
+});
+
+describe('password rules on reset', () => {
+  test('400 for a weak new password', async () => {
+    const { app } = buildApp();
+    const token = jwt.sign({ email: BUSINESS.email, purpose: 'password-reset' }, JWT_SECRET, { expiresIn: '1h' });
+    const res = await request(app).post('/auth/reset-password').send({ token, password: 'password1' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/capital letter/);
   });
 });

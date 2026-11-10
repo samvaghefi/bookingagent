@@ -64,7 +64,7 @@ describe('normalizePhone', () => {
 
 describe('validateSignup', () => {
   test('valid body has no errors and normalised values', () => {
-    const { errors, values } = validateSignup({ ...VALID, email: ' jay@faderoom.ca ', province: 'on' });
+    const { errors, values } = validateSignup({ ...VALID, email: ' Jay@FadeRoom.ca ', province: 'on' });
     expect(errors).toEqual({});
     expect(values).toMatchObject({ email: 'jay@faderoom.ca', phone: '+14165550123', province: 'ON', plan: 'starter' });
   });
