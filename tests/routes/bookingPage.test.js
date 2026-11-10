@@ -194,6 +194,16 @@ function availabilityApp(bizOverride = {}) {
   return buildApp(supabase);
 }
 
+// Availability filters out slots that are already in the past, so dates must be
+// computed relative to "now" rather than hardcoded. NEXT_TUESDAY is always at
+// least one day in the future (in the business timezone), so all its slots are bookable.
+const { DateTime } = require('luxon');
+const TODAY_TZ      = DateTime.now().setZone('America/Toronto').startOf('day');
+const NEXT_TUESDAY  = TODAY_TZ.plus({ days: ((2 - TODAY_TZ.weekday + 7) % 7) || 7 }); // weekday 2 = Tue
+const NEXT_SUNDAY   = NEXT_TUESDAY.plus({ days: 5 }).toISODate();
+const NEXT_WEDNESDAY = NEXT_TUESDAY.plus({ days: 1 }).toISODate();
+const TUESDAY_DATE  = NEXT_TUESDAY.toISODate();
+
 describe('GET /api/book/:businessId/availability', () => {
   test('returns 400 when date param is missing', () => {
     return request(availabilityApp()).get('/api/book/biz-123/availability').then(res => {
@@ -208,14 +218,14 @@ describe('GET /api/book/:businessId/availability', () => {
   });
 
   test('returns closed:true for Sunday (closed day)', () => {
-    return request(availabilityApp()).get('/api/book/biz-123/availability?date=2026-03-22&duration=30').then(res => {
+    return request(availabilityApp()).get(`/api/book/biz-123/availability?date=${NEXT_SUNDAY}&duration=30`).then(res => {
       expect(res.status).toBe(200);
       expect(res.body.closed).toBe(true);
     });
   });
 
   test('returns slots array for Tuesday (open day)', () => {
-    return request(availabilityApp()).get('/api/book/biz-123/availability?date=2026-03-24&duration=30').then(res => {
+    return request(availabilityApp()).get(`/api/book/biz-123/availability?date=${TUESDAY_DATE}&duration=30`).then(res => {
       expect(res.status).toBe(200);
       expect(res.body.closed).toBe(false);
       expect(Array.isArray(res.body.slots)).toBe(true);
@@ -224,7 +234,7 @@ describe('GET /api/book/:businessId/availability', () => {
   });
 
   test('slot objects have time (HH:MM) and available (boolean) fields', () => {
-    return request(availabilityApp()).get('/api/book/biz-123/availability?date=2026-03-24&duration=30').then(res => {
+    return request(availabilityApp()).get(`/api/book/biz-123/availability?date=${TUESDAY_DATE}&duration=30`).then(res => {
       const slot = res.body.slots[0];
       expect(slot).toHaveProperty('time');
       expect(/^\d{2}:\d{2}$/.test(slot.time)).toBe(true);
@@ -234,14 +244,14 @@ describe('GET /api/book/:businessId/availability', () => {
 
   test('returns closed:true for a day not in business_hours', () => {
     // Wednesday not in BUSINESS.business_hours → closed
-    return request(availabilityApp()).get('/api/book/biz-123/availability?date=2026-03-25&duration=30').then(res => {
+    return request(availabilityApp()).get(`/api/book/biz-123/availability?date=${NEXT_WEDNESDAY}&duration=30`).then(res => {
       expect(res.body.closed).toBe(true);
     });
   });
 
   test('returns 404 when business not found', () => {
     const supabase = { from: () => chain({ data: null, error: { message: 'not found' } }) };
-    return request(buildApp(supabase)).get('/api/book/biz-123/availability?date=2026-03-24&duration=30').then(res => {
+    return request(buildApp(supabase)).get(`/api/book/biz-123/availability?date=${TUESDAY_DATE}&duration=30`).then(res => {
       expect(res.status).toBe(404);
     });
   });
