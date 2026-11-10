@@ -46,7 +46,10 @@ function normalizePhone(phone) {
 // Validates the POST /signup body.
 // Returns { errors, values }: errors maps field → message (empty when valid),
 // values holds trimmed/normalised data ready for createBusiness().
-function validateSignup(body = {}) {
+// method 'google': name and email come from Google and there is no password,
+// so only the plan and shop fields are checked.
+function validateSignup(body = {}, { method = 'password' } = {}) {
+  const withLogin = method !== 'google';
   const str = v => (typeof v === 'string' ? v.trim() : '');
   const errors = {};
 
@@ -60,16 +63,18 @@ function validateSignup(body = {}) {
   const province     = str(body.province).toUpperCase();
   const plan         = str(body.plan) || 'solo';
 
-  if (!ownerName)    errors.ownerName    = 'Please enter your name.';
+  if (withLogin && !ownerName) errors.ownerName = 'Please enter your name.';
   if (!businessName) errors.businessName = 'Please enter your business name.';
 
-  if (!email)                    errors.email = 'Please enter your email.';
-  else if (!isValidEmail(email)) errors.email = 'Please enter a valid email address.';
+  if (withLogin) {
+    if (!email)                    errors.email = 'Please enter your email.';
+    else if (!isValidEmail(email)) errors.email = 'Please enter a valid email address.';
 
-  const pwErr = passwordError(password);
-  if (pwErr) errors.password = pwErr;
-  if (!confirm)                errors.confirmPassword = 'Please type your password again.';
-  else if (confirm !== password) errors.confirmPassword = 'Passwords do not match.';
+    const pwErr = passwordError(password);
+    if (pwErr) errors.password = pwErr;
+    if (!confirm)                  errors.confirmPassword = 'Please type your password again.';
+    else if (confirm !== password) errors.confirmPassword = 'Passwords do not match.';
+  }
 
   const phone = normalizePhone(str(body.phone));
   if (!str(body.phone)) errors.phone = 'Please enter your phone number.';

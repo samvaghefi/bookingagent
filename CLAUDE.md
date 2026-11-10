@@ -123,6 +123,12 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
   - Phone stored as E.164 (+1XXXXXXXXXX); province must be a 2-letter code; businessType barbershop|hair-salon|nail-salon|other
   - Invalid → 400 { error, fields: { field: message } }
   - Valid → bcrypt hash stored as password_hash (with city, province) via createBusiness(), creates Stripe Checkout Session, returns { checkoutUrl }
+- Sign up with Google: website form-POSTs plan + shop fields (no name/email/password) to POST /signup/google
+  - Validated with validateSignup(body, { method: 'google' }); bad input → 303 to bimblyai.com/signup?error=invalid
+  - Shop data travels through Google in a signed JWT `state` ('signup.' + jwt, 15 min), bound to the browser by httpOnly cookie bimbly_gsu (nonce)
+  - Reuses the existing redirect URI /auth/dashboard/callback (branches on state prefix 'signup.'), so no Google Console change needed
+  - Callback: requires verified Google email, createBusiness() with Google name/email and no password_hash, then 303 to Stripe checkout
+  - Errors bounce to bimblyai.com/signup?error=exists|google_cancelled|google_expired|google_no_email|google_failed (website shows message and restores the form)
 - On checkout complete (Stripe webhook): sets is_active=true, subscription_status='trial', sends welcome email (mentions plan) + internal notification to hello@bimblyai.com
 - signupService.js: duplicate email → friendly isUserFacing error with 409
 

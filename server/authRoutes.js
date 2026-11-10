@@ -4,6 +4,10 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { passwordError, normalizeEmail } = require('./signupValidation');
 const { authHead, LOGO } = require('./authPageStyles');
+const crypto = require('crypto');
+const { validateSignup } = require('./signupValidation');
+const { createBusiness } = require('./signupService');
+const { createCheckoutSession } = require('./billingService');
 const sgMail = require('@sendgrid/mail');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -41,9 +45,118 @@ router.get('/auth/dashboard/google', (req, res) => {
   res.redirect(url);
 });
 
-// GET /auth/dashboard/callback — handle Google OAuth callback
+// ── Sign up with Google ────────────────────────────────────────────────────
+// The website form posts the plan and shop details here (a normal form
+// submit, not fetch). We check them, carry them through Google inside a
+// signed `state`, and bind that state to this browser with a short-lived
+// cookie. The callback below creates the account from the Google name and
+// email, then sends the person to Stripe checkout like the email signup.
+// Reuses /auth/dashboard/callback so no new redirect URI is needed in Google.
+const SITE_SIGNUP = 'https://bimblyai.com/signup';
+const GSU_COOKIE  = 'bimbly_gsu';
+const GSU_TTL_MS  = 15 * 60 * 1000;
+
+function signupBounce(res, error) {
+  res.clearCookie(GSU_COOKIE, { path: '/auth/dashboard/callback' });
+  return res.redirect(303, `${SITE_SIGNUP}?error=${encodeURIComponent(error)}`);
+}
+
+// POST /signup/google — validate shop details, then send to Google
+router.post('/signup/google', (req, res) => {
+  const { errors, values } = validateSignup(req.body || {}, { method: 'google' });
+  if (Object.keys(errors).length) {
+    console.log('📝 Google signup rejected, invalid fields:', Object.keys(errors).join(', '));
+    return signupBounce(res, 'invalid');
+  }
+
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const { businessName, phone, businessType, city, province, plan } = values;
+  const state = 'signup.' + jwt.sign(
+    { purpose: 'google-signup', nonce, shop: { businessName, phone, businessType, city, province, plan } },
+    process.env.JWT_SECRET,
+    { expiresIn: Math.floor(GSU_TTL_MS / 1000) }
+  );
+
+  res.cookie(GSU_COOKIE, nonce, {
+    httpOnly: true,
+    secure:   process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge:   GSU_TTL_MS,
+    path:     '/auth/dashboard/callback',
+  });
+
+  const url = getDashboardOAuthClient().generateAuthUrl({
+    access_type: 'online',
+    scope: [
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile'
+    ],
+    prompt: 'select_account',
+    state,
+  });
+  console.log(`📝 Google signup started: ${businessName} (${plan})`);
+  res.redirect(303, url);
+});
+
+async function handleGoogleSignup(req, res) {
+  const { code, state, error } = req.query;
+
+  if (error) return signupBounce(res, 'google_cancelled');
+
+  let payload;
+  try {
+    payload = jwt.verify(state.slice('signup.'.length), process.env.JWT_SECRET);
+  } catch {
+    return signupBounce(res, 'google_expired');
+  }
+  if (payload.purpose !== 'google-signup' || !payload.nonce || payload.nonce !== req.cookies?.[GSU_COOKIE]) {
+    return signupBounce(res, 'google_expired');
+  }
+  res.clearCookie(GSU_COOKIE, { path: '/auth/dashboard/callback' });
+
+  let userInfo;
+  try {
+    const oauth2Client = getDashboardOAuthClient();
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+    ({ data: userInfo } = await google.oauth2({ version: 'v2', auth: oauth2Client }).userinfo.get());
+  } catch (err) {
+    console.error('❌ Google signup token exchange failed:', err.message);
+    return signupBounce(res, 'google_failed');
+  }
+
+  const email = normalizeEmail(userInfo.email);
+  if (!email || userInfo.verified_email === false) {
+    return signupBounce(res, 'google_no_email');
+  }
+  const ownerName = (userInfo.name || userInfo.given_name || email.split('@')[0]).trim();
+
+  let business;
+  try {
+    business = await createBusiness({ ...payload.shop, ownerName, email, passwordHash: null });
+  } catch (err) {
+    if (err.isUserFacing) return signupBounce(res, 'exists');
+    console.error('❌ Google signup createBusiness failed:', err.message);
+    return signupBounce(res, 'google_failed');
+  }
+
+  try {
+    const session = await createCheckoutSession(business.id, email, business.plan);
+    console.log(`✅ Google signup: ${business.name} (${email}) → checkout`);
+    return res.redirect(303, session.url);
+  } catch (err) {
+    console.error('❌ Google signup checkout failed for business:', business.id, err.message);
+    return signupBounce(res, 'google_failed');
+  }
+}
+
+// GET /auth/dashboard/callback — handle Google OAuth callback (sign in, or sign up)
 router.get('/auth/dashboard/callback', async (req, res) => {
   const { code, state } = req.query;
+
+  if (typeof state === 'string' && state.startsWith('signup.')) {
+    return handleGoogleSignup(req, res);
+  }
 
   if (state !== 'dashboard') {
     return res.redirect(`${DASHBOARD_URL}/login?error=invalid_state`);
