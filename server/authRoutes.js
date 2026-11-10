@@ -2,6 +2,7 @@ const express = require('express');
 const { google } = require('googleapis');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const { passwordError } = require('./signupValidation');
 const sgMail = require('@sendgrid/mail');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -752,7 +753,8 @@ router.get('/auth/reset-password', (req, res) => {
     <form id="form">
       <div class="field">
         <label for="password">New password</label>
-        <input type="password" id="password" placeholder="At least 8 characters" required minlength="8">
+        <input type="password" id="password" placeholder="Your new password" required minlength="8" aria-describedby="pwrules">
+        <p id="pwrules" style="margin:6px 0 0;font-size:13px;color:#6b7280;">At least 8 characters, with a capital letter, a number and a special character (like ! @ # $).</p>
       </div>
       <div class="field">
         <label for="confirm">Confirm new password</label>
@@ -828,6 +830,11 @@ router.post('/auth/reset-password', async (req, res) => {
 
   if (decoded.purpose !== 'password-reset') {
     return res.status(400).json({ error: 'Invalid reset token' });
+  }
+
+  const pwErr = passwordError(password);
+  if (pwErr) {
+    return res.status(400).json({ error: pwErr });
   }
 
   try {

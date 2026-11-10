@@ -113,8 +113,13 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - POST /api/billing/cancel — cancel subscription at period end
 
 ## Self-Serve Signup Flow
-- GET /signup — split-screen branded signup form (name, business name, email, phone, business type, plan)
-- POST /signup — accepts plan field ('starter'|'pro', default 'starter'), calls createBusiness(), creates Stripe Checkout Session, returns { checkoutUrl }
+- The signup form lives on the website (bimblyai.com/signup). GET /signup here 302-redirects there, keeping ?plan=
+- POST /signup — body: businessName, ownerName, email, password, confirmPassword, phone, businessType, city, province, plan ('solo'|'starter'|'pro', default 'solo')
+  - All fields required; checked by server/signupValidation.js (same rules as the website's signup.js)
+  - Password: 8+ chars, a capital, a number, a special character (max 72 bytes, bcrypt limit). Same rule on POST /auth/reset-password
+  - Phone stored as E.164 (+1XXXXXXXXXX); province must be a 2-letter code; businessType barbershop|hair-salon|nail-salon|other
+  - Invalid → 400 { error, fields: { field: message } }
+  - Valid → bcrypt hash stored as password_hash (with city, province) via createBusiness(), creates Stripe Checkout Session, returns { checkoutUrl }
 - On checkout complete (Stripe webhook): sets is_active=true, subscription_status='trial', sends welcome email (mentions plan) + internal notification to hello@bimblyai.com
 - signupService.js: duplicate email → friendly isUserFacing error with 409
 
