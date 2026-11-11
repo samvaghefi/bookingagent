@@ -128,3 +128,22 @@ describe('checkBeforeBooking', () => {
     expect(await checkBeforeBooking(BUSINESS, { date: MONDAY, time: '09:00' })).toEqual({ ok: true });
   });
 });
+
+describe('incompleteBookingMessage', () => {
+  const { incompleteBookingMessage } = require('../../server/callTools');
+  const full = { name: 'Sarah Willington', customerPhone: '6475550123', service: 'Manicure', date: '2026-11-12', time: '11:00' };
+
+  test('complete booking → null (save it)', () => expect(incompleteBookingMessage(full)).toBeNull());
+
+  test('empty tool call (what the model sent 4 times on a real call) → NOT BOOKED listing every field', () => {
+    const msg = incompleteBookingMessage({});
+    expect(msg).toMatch(/^NOT BOOKED\./);
+    for (const f of ['customerName', 'customerPhone', 'service', 'appointmentDate', 'appointmentTime']) expect(msg).toContain(f);
+  });
+
+  test('one missing field is named', () => {
+    const msg = incompleteBookingMessage({ ...full, time: '  ' });
+    expect(msg).toContain('appointmentTime');
+    expect(msg).not.toContain('customerName');
+  });
+});

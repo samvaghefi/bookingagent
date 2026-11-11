@@ -121,4 +121,25 @@ async function checkBeforeBooking(business, { date, time, service, preferredBarb
   }
 }
 
-module.exports = { handleCheckAvailability, checkBeforeBooking };
+// What bookAppointment must have before anything is saved. The model sometimes
+// calls the tool with no arguments; saving those created empty bookings.
+const REQUIRED_BOOKING_FIELDS = [
+  ['name', "the caller's name (customerName)"],
+  ['customerPhone', 'their phone number (customerPhone)'],
+  ['service', 'the service (service)'],
+  ['date', 'the date (appointmentDate, YYYY-MM-DD)'],
+  ['time', 'the time (appointmentTime, HH:MM)'],
+];
+
+// Returns null when complete, else the reply telling the model what's missing
+function incompleteBookingMessage(bookingData) {
+  const missing = REQUIRED_BOOKING_FIELDS
+    .filter(([key]) => !bookingData[key] || !String(bookingData[key]).trim())
+    .map(([, label]) => label);
+  if (!missing.length) return null;
+  return `NOT BOOKED. The booking was not saved because these were missing: ${missing.join(', ')}. ` +
+    'If you already have them from the conversation, call bookAppointment again right away with ALL fields filled in. ' +
+    "Otherwise ask the caller. Don't tell the caller they're booked until bookAppointment replies \"Booking confirmed\".";
+}
+
+module.exports = { handleCheckAvailability, checkBeforeBooking, incompleteBookingMessage };

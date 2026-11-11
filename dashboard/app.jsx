@@ -648,8 +648,8 @@ function DashboardHome({ business, go, queue }) {
         <StatCard icon="calendar" label="Today" value={today.length} sub={today.length === 1 ? 'appointment' : 'appointments'} />
         <StatCard icon="clock" label="Next 7 days" value={upcoming} sub="upcoming bookings" />
         <StatCard icon="trend" label="This month" value={thisMonth}
-          sub={lastMonth || thisMonth ? <><span className={diff >= 0 ? 'trend-up' : 'trend-down'}>{diff >= 0 ? '+' : ''}{diff}</span> vs last month</> : 'bookings'} />
-        <StatCard icon="dollar" label="Est. revenue" value={fmtMoney(a.revenueEstimateThisMonth)} sub="this month, from your prices" />
+          sub={lastMonth || thisMonth ? <><span className={diff >= 0 ? 'trend-up' : 'trend-down'}>{diff >= 0 ? '+' : ''}{diff}</span> vs last month</> : 'bookings, including upcoming'} />
+        <StatCard icon="dollar" label="Est. revenue" value={fmtMoney(a.revenueEstimateThisMonth)} sub="booked this month, at your prices" />
       </div>
 
       <div className="grid-home">
@@ -696,10 +696,10 @@ function DashboardHome({ business, go, queue }) {
               </ul>
             </Card>
           )}
-          <Card title="Busiest days" description="Last 8 weeks">
+          <Card title="Busiest days" description="Last 8 weeks and upcoming">
             <BarChart data={week} />
           </Card>
-          <Card title="Popular services" description="Last 8 weeks">
+          <Card title="Popular services" description="Last 8 weeks and upcoming">
             <BarChart data={services} />
           </Card>
         </div>

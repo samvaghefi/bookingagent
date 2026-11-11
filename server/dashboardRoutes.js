@@ -129,6 +129,7 @@ router.get('/api/bookings', async (req, res) => {
       .from('bookings')
       .select('*')
       .eq('business_id', req.business.id)
+      .not('appointment_date', 'is', null) // skip old empty tool-call records
       .order('appointment_date', { ascending: false })
       .order('appointment_time', { ascending: false })
       .limit(parseInt(limit));
@@ -163,15 +164,18 @@ router.get('/api/analytics', async (req, res) => {
     const todayStr = now.toISODate();
     const thisMonthStr = now.startOf('month').toISODate();
     const lastMonthStr = now.minus({ months: 1 }).startOf('month').toISODate();
+    const endOfMonthStr = now.endOf('month').toISODate();
     const nextWeekStr = now.plus({ days: 7 }).toISODate();
     const eightWeeksAgoStr = now.minus({ weeks: 8 }).toISODate();
+    const fourWeeksAheadStr = now.plus({ weeks: 4 }).toISODate();
 
-    // Fetch from whichever is earlier: start of last month or 8 weeks ago (for the charts).
+    // Window: from the earlier of last month / 8 weeks ago, to the later of
+    // month end / 4 weeks ahead (charts include upcoming bookings).
     const fetchFrom = eightWeeksAgoStr < lastMonthStr ? eightWeeksAgoStr : lastMonthStr;
-    const fetchTo = nextWeekStr;
+    const fetchTo = [endOfMonthStr, fourWeeksAheadStr, nextWeekStr].sort().pop();
 
     // Fetch all bookings for the analysis window
-    const { data: bookings, error } = await supabase
+    const { data: fetched, error } = await supabase
       .from('bookings')
       .select('*')
       .eq('business_id', req.business.id)
@@ -197,11 +201,17 @@ router.get('/api/analytics', async (req, res) => {
       : 35;
 
     // Partition bookings
-    const thisMonthBookings = bookings.filter(b => b.appointment_date >= thisMonthStr && b.appointment_date <= todayStr);
+    // Only real bookings: not cancelled, and with a date (old empty tool-call records had none)
+    const isCounted = b => b.appointment_date && b.customer_name && !['cancelled', 'canceled'].includes(String(b.status || '').toLowerCase());
+    const bookings = (fetched || []).filter(isCounted);
+
+    // "This month" = everything booked in the calendar month, including upcoming appointments
+    const thisMonthBookings = bookings.filter(b => b.appointment_date >= thisMonthStr && b.appointment_date <= endOfMonthStr);
     const lastMonthBookings = bookings.filter(b => b.appointment_date >= lastMonthStr && b.appointment_date < thisMonthStr);
     const todayBookings = bookings.filter(b => b.appointment_date === todayStr);
     const upcomingBookings = bookings.filter(b => b.appointment_date > todayStr && b.appointment_date <= nextWeekStr);
-    const recentBookings = bookings.filter(b => b.appointment_date >= eightWeeksAgoStr && b.appointment_date <= todayStr);
+    // Charts: last 8 weeks plus everything booked for the next 4 weeks
+    const recentBookings = bookings.filter(b => b.appointment_date >= eightWeeksAgoStr && b.appointment_date <= fourWeeksAheadStr);
 
     // Revenue estimate this month: sum of each booked service's price
     const revenueEstimateThisMonth = thisMonthBookings.reduce((sum, b) => {
@@ -225,7 +235,7 @@ router.get('/api/analytics', async (req, res) => {
     // Popular services
     const serviceCounts = {};
     recentBookings.forEach(b => {
-      (b.service_ids || []).forEach(name => {
+      (b.service_ids || []).filter(Boolean).forEach(name => {
         serviceCounts[name] = (serviceCounts[name] || 0) + 1;
       });
     });

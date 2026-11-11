@@ -20,7 +20,7 @@ const { extractFromToolCall, extractBookingInfo, findBusiness, saveBooking } = r
 const { sendCustomerSMS, sendOwnerEmail, sendWelcomeEmail, sendInternalSignupNotification, sendPaymentFailedEmail } = require('./notificationService');
 const { sendDueReminders, maybeScheduleReminder } = require('./reminderService');
 const { getAuthUrl, getTokensFromCode, createCalendarEvent, getPrimaryCalendarEmail } = require('./calendarService');
-const { handleCheckAvailability, checkBeforeBooking } = require('./callTools');
+const { handleCheckAvailability, checkBeforeBooking, incompleteBookingMessage } = require('./callTools');
 const stripe = require('stripe')(
   process.env.TEST_MODE === 'true'
     ? process.env.STRIPE_TEST_SECRET_KEY
@@ -405,6 +405,28 @@ app.post('/webhook/booking', async (req, res) => {
       const toolCallArgs = parseArgs(toolCall);
       const bookingData = extractFromToolCall(toolCallArgs);
       console.log('Extracted booking data:', bookingData);
+
+      // Never save an incomplete booking (the model sometimes calls with no arguments)
+      const incomplete = incompleteBookingMessage(bookingData);
+      if (incomplete) {
+        console.log('🚫 bookAppointment called with missing fields, not saved:', JSON.stringify(toolCallArgs));
+        results.push({ toolCallId: toolCall.id, result: incomplete });
+        return res.status(200).json({ results });
+      }
+
+      // Same booking already saved on this call (the model repeated the tool call)
+      if (callId) {
+        const { data: dupes } = await supabase.from('bookings').select('id')
+          .eq('vapi_call_id', callId)
+          .eq('appointment_date', bookingData.date)
+          .eq('appointment_time', `${String(bookingData.time).slice(0, 5)}:00`)
+          .limit(1);
+        if (dupes && dupes.length) {
+          console.log('ℹ️  Duplicate bookAppointment on the same call, not saved again');
+          results.push({ toolCallId: toolCall.id, result: 'Booking confirmed successfully' });
+          return res.status(200).json({ results });
+        }
+      }
 
       // Re-check right before saving so two callers can't take the same time
       const slot = await checkBeforeBooking(business, {
