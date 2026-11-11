@@ -89,6 +89,16 @@ function currentDateTimeTemplate(tz) {
   return `{{"now" | date: "%A, %B %-d, %Y, %-I:%M %p", "${tz}"}}`;
 }
 
+// The first thing callers hear. Built from the shop's current name so it never
+// keeps the template assistant's greeting (it used to say "Sams Barbershop" for every shop).
+function greetingFor(business) {
+  return `Hello! Thank you for calling ${business.name}. How can I help you today?`;
+}
+
+function assistantNameFor(business) {
+  return `${business.name} Receptionist`.substring(0, 40); // Vapi limit: 40 characters
+}
+
 function vapiHeaders() {
   return {
     Authorization: `Bearer ${process.env.VAPI_API_KEY}`,
@@ -174,9 +184,8 @@ async function createVapiAssistant(business, { services = [], businessHours = nu
     delete newConfig[field];
   }
 
-  // Vapi enforces a 40-character limit on assistant names
-  const assistantName = `${business.name} Receptionist`.substring(0, 40);
-  newConfig.name = assistantName;
+  newConfig.name = assistantNameFor(business);
+  newConfig.firstMessage = greetingFor(business);
 
   if (newConfig.model) {
     const updatedMessages = [...messages];
@@ -370,7 +379,7 @@ async function rebuildAndPatchVapiPrompt(business, services) {
   try {
     await axios.patch(
       `${VAPI_BASE}/assistant/${assistantId}`,
-      { model },
+      { model, firstMessage: greetingFor(business), name: assistantNameFor(business) },
       { headers: vapiHeaders(), timeout: 15000 }
     );
   } catch (err) {
@@ -380,4 +389,4 @@ async function rebuildAndPatchVapiPrompt(business, services) {
   console.log(`Vapi prompt rebuilt for ${business.name} (${assistantId})`);
 }
 
-module.exports = { createVapiAssistant, updateVapiAssistant, deleteVapiAssistant, buildSystemPrompt, rebuildAndPatchVapiPrompt, ensureAvailabilityTool, attachPhoneNumber, AVAILABILITY_TOOL };
+module.exports = { createVapiAssistant, updateVapiAssistant, deleteVapiAssistant, buildSystemPrompt, rebuildAndPatchVapiPrompt, ensureAvailabilityTool, attachPhoneNumber, greetingFor, AVAILABILITY_TOOL };
