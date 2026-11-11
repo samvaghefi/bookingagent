@@ -20,7 +20,7 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-const DASHBOARD_URL = 'https://bookingagent-gmo2.onrender.com/dashboard';
+const { dashboardUrl, loginUrl } = require('./appUrl');
 
 function getDashboardOAuthClient() {
   const base = process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000';
@@ -159,7 +159,7 @@ router.get('/auth/dashboard/callback', async (req, res) => {
   }
 
   if (state !== 'dashboard') {
-    return res.redirect(`${DASHBOARD_URL}/login?error=invalid_state`);
+    return res.redirect(loginUrl({ error: 'invalid_state' }));
   }
 
   try {
@@ -173,7 +173,7 @@ router.get('/auth/dashboard/callback', async (req, res) => {
     const email = normalizeEmail(userInfo.email);
 
     if (!email) {
-      return res.redirect(`${DASHBOARD_URL}/login?error=no_email`);
+      return res.redirect(loginUrl({ error: 'no_email' }));
     }
 
     // Look up business by email
@@ -185,7 +185,7 @@ router.get('/auth/dashboard/callback', async (req, res) => {
 
     if (error || !business) {
       console.log(`⚠️  Dashboard login attempt for unknown email: ${email}`);
-      return res.redirect(`/auth/dashboard/login?error=no_account`);
+      return res.redirect(loginUrl({ error: 'no_account' }));
     }
 
     // Create JWT — React app reads this from URL and stores in localStorage
@@ -196,10 +196,10 @@ router.get('/auth/dashboard/callback', async (req, res) => {
     );
 
     console.log(`✅ Dashboard login: ${business.name} (${email})`);
-    res.redirect(`${DASHBOARD_URL}/?token=${token}`);
+    res.redirect(dashboardUrl({ token }));
   } catch (err) {
     console.error('❌ Dashboard OAuth callback error:', err.message);
-    res.redirect(`${DASHBOARD_URL}/login?error=auth_failed`);
+    res.redirect(loginUrl({ error: 'auth_failed' }));
   }
 });
 
@@ -279,7 +279,7 @@ router.get('/auth/dashboard/login', (req, res) => {
   </div>
 
   <script>
-    const DASHBOARD = 'https://bookingagent-gmo2.onrender.com/dashboard';
+    const DASHBOARD = ${JSON.stringify(dashboardUrl())};
     document.getElementById('email-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const errEl = document.getElementById('form-error');
@@ -305,7 +305,7 @@ router.get('/auth/dashboard/login', (req, res) => {
         });
         const data = await res.json();
         if (res.ok && data.token) {
-          window.location.href = DASHBOARD + '/?token=' + data.token;
+          window.location.href = DASHBOARD + '?token=' + encodeURIComponent(data.token);
         } else {
           fail(data.error || 'Sign in didn\\'t work. Please try again.');
         }
@@ -320,7 +320,7 @@ router.get('/auth/dashboard/login', (req, res) => {
 
 // GET /auth/logout — redirect to dashboard login
 router.get('/auth/logout', (req, res) => {
-  res.redirect(`${DASHBOARD_URL}/login`);
+  res.redirect(loginUrl());
 });
 
 // GET /auth/forgot-password-page — serve the forgot-password form
@@ -482,15 +482,15 @@ router.get('/auth/reset-password', (req, res) => {
 
   // Validate token before rendering the form
   if (!token) {
-    return res.redirect(`/auth/dashboard/login?error=auth_failed`);
+    return res.redirect(loginUrl({ error: 'auth_failed' }));
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (decoded.purpose !== 'password-reset') {
-      return res.redirect(`/auth/dashboard/login?error=auth_failed`);
+      return res.redirect(loginUrl({ error: 'auth_failed' }));
     }
   } catch {
-    return res.redirect(`/auth/dashboard/login?error=auth_failed`);
+    return res.redirect(loginUrl({ error: 'auth_failed' }));
   }
 
   res.send(`<!DOCTYPE html>

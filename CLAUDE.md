@@ -112,6 +112,11 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - Google OAuth app is published to production (no test-user allowlist required)
 - Authorized redirect URI in Google Cloud Console: https://bookingagent-gmo2.onrender.com/auth/dashboard/callback
 
+## Dashboard address (APP_URL)
+- server/appUrl.js: dashboardUrl(query), loginUrl(query), hostRouting(). Use these for every user-facing link/redirect (sign-in, emails, calendar return); never hardcode the Render address
+- APP_URL unset → Render address (/dashboard/, /auth/dashboard/login). APP_URL=https://dashboard.bimblyai.com → dashboard at "/", sign-in at "/login", "/logout"; GET pages on the Render host 301 to the new domain. API, webhooks (Vapi, Stripe) and Google OAuth callbacks (RENDER_EXTERNAL_URL) keep working on both hosts
+- Setup: Render custom domain dashboard.bimblyai.com + GoDaddy CNAME dashboard → bookingagent-gmo2.onrender.com, then set APP_URL in Render. Sign-in sessions are per address, so users sign in once after the switch
+
 ## Dashboard SPA
 - Served at GET /dashboard → dashboard/index.html
 - Static assets at /dashboard/style.css and /dashboard/app.jsx; API_BASE is window.location.origin (same server)

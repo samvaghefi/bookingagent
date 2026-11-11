@@ -86,7 +86,7 @@ async function sendOwnerEmail(business, bookingOrSubject, alertText) {
 // (Google, or the email + password they chose) and link to the sign-in page.
 // Styled to match bimblyai.com. Table layout + inline styles for email clients;
 // PNG logo because Gmail/Outlook don't render SVG.
-const SIGN_IN_URL  = 'https://bookingagent-gmo2.onrender.com/auth/dashboard/login';
+const { loginUrl, dashboardUrl } = require('./appUrl');
 const EMAIL_LOGO   = 'https://bimblyai.com/assets/bimblyai-logo-email.png';
 const PLAN_PRICES  = { solo: ['Solo', 39], starter: ['Starter', 99], pro: ['Pro', 199] };
 
@@ -161,7 +161,7 @@ function buildWelcomeEmail(business) {
 
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 12px;">
             <tr><td style="border-radius:6px;background:${ink};">
-              <a href="${SIGN_IN_URL}" style="display:inline-block;padding:15px 28px;font:700 16px/1 ${display};color:#ffffff;text-decoration:none;border-radius:6px;">Sign in to Bimbly</a>
+              <a href="${loginUrl()}" style="display:inline-block;padding:15px 28px;font:700 16px/1 ${display};color:#ffffff;text-decoration:none;border-radius:6px;">Sign in to Bimbly</a>
             </td></tr>
           </table>
           <p style="margin:0 0 28px;font:400 15px/1.5 ${font};color:${grey};">${howHtml}</p>
@@ -198,7 +198,7 @@ function buildWelcomeEmail(business) {
     '',
     `Your account for ${shop} is ready. ${trialText}`,
     '',
-    `Sign in here: ${SIGN_IN_URL}`,
+    `Sign in here: ${loginUrl()}`,
     howText,
     '',
     'What to do next:',
@@ -239,7 +239,7 @@ async function sendWelcomeEmail(business) {
 // ── sendInternalSignupNotification ────────────────────────────────────────────
 async function sendInternalSignupNotification(business) {
   const label     = planLabel(business.plan);
-  const dashUrl   = 'https://bookingagent-gmo2.onrender.com/dashboard';
+  const dashUrl   = dashboardUrl();
   const timestamp = new Date().toLocaleString('en-CA', { timeZone: 'America/Toronto', dateStyle: 'medium', timeStyle: 'short' });
 
   const row = (label, value, highlight = false) => `

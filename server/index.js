@@ -46,6 +46,10 @@ const calendarRoutes = require('./calendarRoutes');
 
 const app = express();
 
+// dashboard.bimblyai.com (APP_URL): "/" is the dashboard, "/login" signs in, and
+// old Render page links forward there. Must run before every other route.
+app.use(require('./appUrl').hostRouting());
+
 // ── CORS ──────────────────────────────────────────────────────────────────────
 const corsOptions = {
   origin: [
@@ -332,7 +336,7 @@ app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'dashboard', 'index.html'));
 });
 app.get('/dashboard/login', (req, res) => {
-  res.redirect(`${process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000'}/auth/dashboard/login`);
+  res.redirect(require('./appUrl').loginUrl());
 });
 
 // Initialize Supabase client
@@ -552,7 +556,7 @@ app.get('/auth/google/callback', async (req, res) => {
 
   // Dashboard "Connect Google Calendar" button: state is 'cal.' + signed JWT
   if (String(state).startsWith('cal.')) {
-    const back = status => res.redirect(303, `/dashboard/?calendar=${status}#/settings/calendar`);
+    const back = status => res.redirect(303, `${require('./appUrl').dashboardUrl({ calendar: status })}#/settings/calendar`);
     let payload;
     try {
       payload = require('jsonwebtoken').verify(String(state).slice(4), process.env.JWT_SECRET);
