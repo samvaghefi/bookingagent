@@ -262,11 +262,12 @@ function Field({ label, hint, error, optional, htmlFor, children, className = ''
 
 function Switch({ checked, onChange, disabled, label, id }) {
   return (
-    <span className="switch">
+    // A <label>, so a click anywhere on the switch toggles it
+    <label className="switch">
       <input type="checkbox" role="switch" id={id} aria-label={label} checked={!!checked} disabled={disabled}
         onChange={e => onChange(e.target.checked)} />
       <span className="switch-track" aria-hidden="true"></span>
-    </span>
+    </label>
   );
 }
 
