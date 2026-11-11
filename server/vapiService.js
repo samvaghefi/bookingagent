@@ -32,6 +32,63 @@ const SERVER_ASSIGNED_FIELDS = [
   'isServerUrlSecretSet',
 ];
 
+// ── checkAvailability tool ────────────────────────────────────────────────────
+// Lets the assistant ask the server which times are open before offering any.
+// Created once in Vapi (or found by name) and attached to every assistant.
+const AVAILABILITY_TOOL_NAME = 'checkAvailability';
+const WEBHOOK_URL = `${process.env.RENDER_EXTERNAL_URL || process.env.BASE_URL || 'https://bookingagent-gmo2.onrender.com'}/webhook/booking`;
+const AVAILABILITY_TOOL = {
+  type: 'function',
+  function: {
+    name: AVAILABILITY_TOOL_NAME,
+    description: 'Check which appointment times are open. Call this BEFORE suggesting, offering or confirming any day or time. The reply lists the only times you may offer.',
+    parameters: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'The day the caller wants, as YYYY-MM-DD in the shop time zone. "today" and "tomorrow" also work.' },
+        time: { type: 'string', description: 'Optional. The start time the caller asked for, as HH:MM 24-hour (e.g. 14:30). Leave out to get all open times that day.' },
+        service: { type: 'string', description: 'Optional. The service from the SERVICES list, so the right appointment length is checked.' },
+        preferredBarber: { type: 'string', description: 'Optional. The team member the caller asked for. Leave out if no preference.' },
+      },
+      required: ['date'],
+    },
+  },
+  server: { url: WEBHOOK_URL },
+  messages: [{ type: 'request-start', content: 'One moment while I check the schedule.' }],
+};
+
+let availabilityToolId = process.env.VAPI_AVAILABILITY_TOOL_ID || null;
+
+async function ensureAvailabilityTool() {
+  if (availabilityToolId) return availabilityToolId;
+  try {
+    const list = await axios.get(`${VAPI_BASE}/tool?limit=100`, { headers: vapiHeaders(), timeout: 15000 });
+    const existing = (list.data || []).find(t => t.function && t.function.name === AVAILABILITY_TOOL_NAME);
+    if (existing) {
+      availabilityToolId = existing.id;
+      return availabilityToolId;
+    }
+    const created = await axios.post(`${VAPI_BASE}/tool`, AVAILABILITY_TOOL, { headers: vapiHeaders(), timeout: 15000 });
+    availabilityToolId = created.data.id;
+    console.log(`Vapi checkAvailability tool created: ${availabilityToolId}`);
+    return availabilityToolId;
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
+}
+
+// Model config with the availability tool attached (keeps existing tools)
+async function withAvailabilityTool(model) {
+  const toolId = await ensureAvailabilityTool();
+  const toolIds = Array.isArray(model && model.toolIds) ? model.toolIds : [];
+  return { ...(model || {}), toolIds: toolIds.includes(toolId) ? toolIds : [...toolIds, toolId] };
+}
+
+// Vapi fills this in on every call with the current date/time in the shop's time zone
+function currentDateTimeTemplate(tz) {
+  return `{{"now" | date: "%A, %B %-d, %Y, %-I:%M %p", "${tz}"}}`;
+}
+
 function vapiHeaders() {
   return {
     Authorization: `Bearer ${process.env.VAPI_API_KEY}`,
@@ -73,7 +130,8 @@ function buildSystemPrompt(business, { services = [], businessHours = null } = {
     .replace(/\{\{openingHours\}\}/g,     formatBusinessHours(businessHours || business.business_hours || null))
     .replace(/\{\{services\}\}/g,         formatServices(services))
     .replace(/\{\{teamMembers\}\}/g,      formatTeamMembers(business.team_members || business.barbers || []))
-    .replace(/\{\{depositPolicy\}\}/g,    depositPolicyText);
+    .replace(/\{\{depositPolicy\}\}/g,    depositPolicyText)
+    .replace(/\{\{currentDateTime\}\}/g,  currentDateTimeTemplate(tz));
 
   if (!langs.includes('ko')) {
     prompt = prompt
@@ -125,7 +183,7 @@ async function createVapiAssistant(business, { services = [], businessHours = nu
     if (sysMsgIndex >= 0) {
       updatedMessages[sysMsgIndex] = { ...messages[sysMsgIndex], content: systemPrompt };
     }
-    newConfig.model = { ...newConfig.model, messages: updatedMessages };
+    newConfig.model = await withAvailabilityTool({ ...newConfig.model, messages: updatedMessages });
   }
 
   // 5. Create the assistant
@@ -271,10 +329,11 @@ async function rebuildAndPatchVapiPrompt(business, services) {
     updatedMessages.push({ role: 'system', content: systemPrompt });
   }
 
+  const model = await withAvailabilityTool({ ...current.model, messages: updatedMessages });
   try {
     await axios.patch(
       `${VAPI_BASE}/assistant/${assistantId}`,
-      { model: { ...current.model, messages: updatedMessages } },
+      { model },
       { headers: vapiHeaders(), timeout: 15000 }
     );
   } catch (err) {
@@ -284,4 +343,4 @@ async function rebuildAndPatchVapiPrompt(business, services) {
   console.log(`Vapi prompt rebuilt for ${business.name} (${assistantId})`);
 }
 
-module.exports = { createVapiAssistant, updateVapiAssistant, deleteVapiAssistant, buildSystemPrompt, rebuildAndPatchVapiPrompt };
+module.exports = { createVapiAssistant, updateVapiAssistant, deleteVapiAssistant, buildSystemPrompt, rebuildAndPatchVapiPrompt, ensureAvailabilityTool, AVAILABILITY_TOOL };

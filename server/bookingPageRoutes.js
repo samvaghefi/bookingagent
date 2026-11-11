@@ -3,7 +3,8 @@ const path     = require('path');
 const fs       = require('fs');
 const { createClient } = require('@supabase/supabase-js');
 const { DateTime } = require('luxon');
-const { getFreeBusy, createCalendarEvent } = require('./calendarService');
+const { createCalendarEvent } = require('./calendarService');
+const availability = require('./availabilityService');
 const { sendCustomerSMS, sendOwnerEmail }  = require('./notificationService');
 const { maybeScheduleReminder }            = require('./reminderService');
 const { createDepositToken }               = require('./depositService'); // already exists at server/depositService.js
@@ -102,83 +103,17 @@ router.get('/api/book/:businessId/availability', async (req, res) => {
 
     if (error || !business) return res.status(404).json({ error: 'Business not found.' });
 
-    const tz       = business.timezone || 'America/Toronto';
-    const hours    = business.business_hours || {};
-    // Use numeric weekday (locale-independent: 1=Mon…7=Sun) to avoid Intl locale issues
-    // that cause weekdayLong to return non-English names on some server environments.
-    const DAY_KEYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-    const dayKey   = DAY_KEYS[DateTime.fromISO(date, { zone: tz }).weekday - 1];
-    const dayHours = hours[dayKey];
-
-    if (!dayHours || dayHours.closed) return res.json({ slots: [], closed: true });
-
-    // Generate 30-min candidate slots within open hours, excluding past slots if today
-    const openTime  = DateTime.fromISO(`${date}T${dayHours.open}`,  { zone: tz });
-    const closeTime = DateTime.fromISO(`${date}T${dayHours.close}`, { zone: tz });
-    const now = DateTime.now().setZone(tz);
-
-    const candidates = [];
-    let cursor = openTime;
-    while (cursor.plus({ minutes: duration }) <= closeTime) {
-      if (cursor > now) candidates.push(cursor);
-      cursor = cursor.plus({ minutes: 30 });
-    }
-
-    // Fetch bookings for this business on this date
-    let q = supabase
-      .from('bookings')
-      .select('appointment_time, duration_minutes, preferred_barber')
-      .eq('business_id', req.params.businessId)
-      .eq('appointment_date', date)
-      .neq('status', 'cancelled');
-
-    if (barberName) q = q.eq('preferred_barber', barberName);
-
-    const { data: bookings } = await q;
-    const existingBookings = (bookings || []).map(b => {
-      const start = DateTime.fromISO(`${date}T${b.appointment_time}`, { zone: tz });
-      return { start, end: start.plus({ minutes: b.duration_minutes || 60 }) };
+    // Same rules as phone bookings: hours, bookings, blocked time, Google Calendar
+    const day = await availability.getDayAvailability(business, date, {
+      durationMinutes: duration,
+      teamMember: barberName || undefined,
     });
+    if (day.closed) return res.json({ slots: [], closed: true });
 
-    // Normalise barbers: prefer team_members column, fall back to barbers
-    const rawMembers = business.team_members || business.barbers || [];
-    const barbers = rawMembers.map(b =>
-      typeof b === 'string' ? { name: b, role: '', calendarId: '' } : { role: '', calendarId: '', ...b }
-    ).filter(b => b.name);
-
-    // Google Calendar free/busy — use barber's calendarId if provided, else 'primary'
-    let calendarId = 'primary';
-    if (barberName) {
-      const barber = barbers.find(b => b.name === barberName);
-      if (barber?.calendarId) calendarId = barber.calendarId;
-    }
-    const busyIntervals = await getFreeBusy(business, calendarId, date, tz);
-    const calConflicts  = busyIntervals.map(b => ({
-      start: DateTime.fromJSDate(b.start, { zone: tz }),
-      end:   DateTime.fromJSDate(b.end,   { zone: tz }),
-    }));
-
-    const totalBarbers = Math.max(barbers.length, 1);
-
-    const slots = candidates.map(slotStart => {
-      const slotEnd = slotStart.plus({ minutes: duration });
-
-      if (barberName) {
-        // Specific barber: any overlap = unavailable
-        const allConflicts = [...existingBookings, ...calConflicts];
-        const blocked = allConflicts.some(c => c.start < slotEnd && c.end > slotStart);
-        return { time: slotStart.toFormat('HH:mm'), available: !blocked };
-      } else {
-        // No barber preference: slot unavailable only when ALL barbers are simultaneously occupied
-        const overlapCount = existingBookings.filter(c => c.start < slotEnd && c.end > slotStart).length;
-        const calBlocked   = calConflicts.some(c => c.start < slotEnd && c.end > slotStart);
-        return {
-          time:      slotStart.toFormat('HH:mm'),
-          available: overlapCount < totalBarbers && !calBlocked,
-        };
-      }
-    });
-
+    // Past times aren't shown at all (as before); the rest come with available true/false
+    const slots = day.slots
+      .filter(s => s.reason !== 'past')
+      .map(s => ({ time: s.time, available: s.available }));
     res.json({ slots, closed: false });
   } catch (err) {
     console.error('GET /api/book/:businessId/availability error:', err.message);
@@ -228,6 +163,20 @@ router.post('/api/book/:businessId', async (req, res) => {
       .single();
 
     if (error || !business) return res.status(404).json({ error: 'Business not found.' });
+
+    // Re-check the time right before saving (someone may have just taken it)
+    try {
+      const slot = await availability.checkSlot(business, {
+        date: appointmentDate, time: appointmentTime, service,
+        durationMinutes: duration_minutes ? safeDuration : undefined,
+        teamMember: preferredBarber || undefined,
+      });
+      if (!slot.available) {
+        return res.status(409).json({ error: 'Sorry, that time was just taken. Please pick another time.', reason: slot.reason });
+      }
+    } catch (checkErr) {
+      console.error('Availability re-check failed, booking anyway:', checkErr.message);
+    }
 
     const record = {
       business_id:      business.id,

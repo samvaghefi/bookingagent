@@ -1184,6 +1184,7 @@ function ClientProfilePage({ clientId, setClients, go }) {
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+// Must match DEFAULT_DAY_HOURS in server/availabilityService.js
 const DEFAULT_HOURS = { open: '09:00', close: '18:00', closed: false };
 
 const TIMEZONES = [
@@ -1199,6 +1200,7 @@ const TIMEZONES = [
 const SETTINGS_TABS = [
   { id: 'business', label: 'Business' },
   { id: 'hours',    label: 'Hours' },
+  { id: 'calendar', label: 'Calendar' },
   { id: 'services', label: 'Services' },
   { id: 'team',     label: 'Team' },
   { id: 'booking',  label: 'Booking page' },
@@ -1243,7 +1245,8 @@ function SettingsPage({ tab, go, onBusinessUpdated }) {
       {loading ? <Spinner /> : error ? <Notice type="error">{error}</Notice> : (
         <div className="stack" key={current}>
           {current === 'business' && <BusinessSettings business={business} onSaved={patchBusiness} />}
-          {current === 'hours'    && <HoursSettings business={business} onSaved={patchBusiness} />}
+          {current === 'hours'    && <HoursSettings business={business} onSaved={patchBusiness} go={go} />}
+          {current === 'calendar' && <CalendarSettings business={business} go={go} />}
           {current === 'services' && <ServicesSettings services={services} setServices={setServices} />}
           {current === 'team'     && <TeamSettings business={business} onSaved={patchBusiness} go={go} />}
           {current === 'booking'  && <BookingPageSettings business={business} onSaved={patchBusiness} go={go} />}
@@ -1331,7 +1334,7 @@ function BusinessSettings({ business, onSaved }) {
   );
 }
 
-function HoursSettings({ business, onSaved }) {
+function HoursSettings({ business, onSaved, go }) {
   const [hours, setHours] = useState(() => {
     const h = {};
     DAYS.forEach(d => { h[d] = { ...DEFAULT_HOURS, ...(business.business_hours?.[d] || {}) }; });
@@ -1364,7 +1367,7 @@ function HoursSettings({ business, onSaved }) {
   };
 
   return (
-    <Card title="Opening hours" description="Your AI receptionist only books appointments when you're open."
+    <Card title="Opening hours" description={<>Your AI receptionist only books appointments when you're open. For a lunch break, day off or holiday, <button className="btn-link" onClick={() => go('settings', 'calendar')}>block time in Calendar</button>.</>}
       action={<button className="btn btn--secondary btn--sm" onClick={copyMonday}><Icon name="copy" />Copy Monday to all days</button>}
       flush footer={<SaveFooter saving={saving} status={status} dirty={dirty} onSave={save} label="Save hours" />}>
       <div className="list-rows">
@@ -1388,6 +1391,430 @@ function HoursSettings({ business, onSaved }) {
         })}
       </div>
     </Card>
+  );
+}
+
+
+// ── Calendar (Google connection, week view, blocked time) ────────────────────
+const WEEKDAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function minutesOf(hhmm) {
+  if (!hhmm) return null;
+  const [h, m] = String(hhmm).split(':').map(Number);
+  return h * 60 + (m || 0);
+}
+function hhmmOf(min) {
+  return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+}
+function shortTime(min) {
+  const h = Math.floor(min / 60) % 24, m = min % 60;
+  const ap = h >= 12 ? 'PM' : 'AM';
+  return `${h % 12 || 12}${m ? ':' + String(m).padStart(2, '0') : ''} ${ap}`;
+}
+function isoAddDays(iso, n) {
+  const d = new Date(iso + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  return localISODate(d);
+}
+function mondayOf(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  const back = (d.getDay() + 6) % 7;
+  d.setDate(d.getDate() - back);
+  return localISODate(d);
+}
+
+function describeBlock(b) {
+  const time = b.start_time ? `${fmtTime(b.start_time.slice(0, 5))} to ${fmtTime(b.end_time.slice(0, 5))}` : 'All day';
+  if (b.repeat === 'weekly') {
+    const days = (b.weekdays || []).map(d => WEEKDAY_SHORT[d - 1]).join(', ');
+    const range = b.end_date ? `${fmtDate(b.start_date, { month: 'short', day: 'numeric' })} to ${fmtDate(b.end_date, { month: 'short', day: 'numeric' })}` : `from ${fmtDate(b.start_date, { month: 'short', day: 'numeric' })}`;
+    return { when: `Every ${days}`, time, range };
+  }
+  const when = b.end_date && b.end_date !== b.start_date
+    ? `${fmtDate(b.start_date, { weekday: 'short', month: 'short', day: 'numeric' })} to ${fmtDate(b.end_date, { weekday: 'short', month: 'short', day: 'numeric' })}`
+    : fmtDate(b.start_date, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  return { when, time, range: '' };
+}
+
+function CalendarSettings({ business, go }) {
+  const toast = useToast();
+  const [status, setStatus] = useState(null);
+  const [blocks, setBlocks] = useState([]);
+  const [setupPending, setSetupPending] = useState(false);
+  const [editing, setEditing] = useState(null); // block being added/edited
+  const [weekKey, setWeekKey] = useState(0);    // bump to reload the week
+  const members = normalizeTeam(business.team_members || business.barbers).map(m => m.name);
+
+  const loadBlocks = useCallback(() => api('/api/calendar/blocks')
+    .then(d => { setBlocks(d.blocks || []); setSetupPending(!!d.setupPending); })
+    .catch(err => toast(err.message, 'error')), [toast]);
+
+  useEffect(() => {
+    api('/api/calendar/status').then(setStatus).catch(() => setStatus({ connected: false }));
+    loadBlocks();
+    // Coming back from Google
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get('calendar');
+    if (result) {
+      const msg = {
+        connected: ['Google Calendar connected', 'success'],
+        cancelled: ['Google Calendar was not connected', 'error'],
+        expired: ['That link expired. Please click Connect again.', 'error'],
+        failed: ["We couldn't connect Google Calendar. Please try again.", 'error'],
+      }[result];
+      if (msg) toast(msg[0], msg[1]);
+      params.delete('calendar');
+      const url = new URL(window.location.href);
+      url.search = params.toString();
+      window.history.replaceState({}, '', url);
+    }
+  }, []);
+
+  const saved = () => { loadBlocks(); setWeekKey(k => k + 1); };
+
+  return (
+    <>
+      <GoogleCalendarCard status={status} setStatus={setStatus} onChange={() => setWeekKey(k => k + 1)} go={go} hasTeamCalendars={normalizeTeam(business.team_members).some(m => m.calendarId)} />
+      <WeekCalendar reloadKey={weekKey} blocks={blocks} onAdd={prefill => setEditing({ ...prefill })} onEdit={b => setEditing(b)} go={go} setupPending={setupPending} />
+      <BlockedTimeList blocks={blocks} setupPending={setupPending} onAdd={() => setEditing({})} onEdit={b => setEditing(b)} onDeleted={saved} />
+      {editing && <BlockDialog block={editing} members={members} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); saved(); }} />}
+    </>
+  );
+}
+
+function GoogleCalendarCard({ status, setStatus, onChange, go, hasTeamCalendars }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+
+  const connect = async () => {
+    setBusy(true);
+    try {
+      const d = await api('/api/calendar/connect', { method: 'POST' });
+      window.location.href = d.url;
+    } catch (err) {
+      toast(err.message, 'error');
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    try {
+      await api('/api/calendar/connection', { method: 'DELETE' });
+      setStatus({ connected: false, email: null });
+      setConfirm(false);
+      onChange();
+      toast('Google Calendar disconnected');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally { setBusy(false); }
+  };
+
+  if (!status) return <Card title="Google Calendar"><div className="spinner" style={{ margin: '8px auto' }}></div></Card>;
+
+  return (
+    <Card title="Google Calendar"
+      badge={status.connected ? <span className="badge badge--green"><Icon name="check" />Connected</span> : null}
+      description={status.connected
+        ? <>Bimbly checks {status.email ? <strong>{status.email}</strong> : 'your calendar'} before offering any time, on calls and on your booking page. New bookings are added to it.</>
+        : 'Connect the calendar you already use. Bimbly checks it before offering any time, on calls and on your booking page, and adds new bookings to it.'}
+      footer={status.connected
+        ? <button className="btn btn--danger-outline" onClick={() => setConfirm(true)} disabled={busy}>Disconnect</button>
+        : <button className="btn btn--primary" onClick={connect} disabled={busy}><Icon name="calendar" />{busy ? 'Opening Google…' : 'Connect Google Calendar'}</button>}>
+      <p className="field-hint">
+        {hasTeamCalendars
+          ? 'Team members with their own calendar in Team are checked too.'
+          : <>Each team member can also have their own calendar. <button className="btn-link" onClick={() => go('settings', 'team')}>Add it in Team</button>.</>}
+        {!status.connected && ' Not using Google Calendar? Block time below instead.'}
+      </p>
+      {confirm && (
+        <ConfirmDialog title="Disconnect Google Calendar?" confirmLabel="Disconnect" busy={busy} onCancel={() => setConfirm(false)} onConfirm={disconnect}>
+          Bimbly will stop checking your Google Calendar and stop adding bookings to it. Your opening hours and blocked time still apply.
+        </ConfirmDialog>
+      )}
+    </Card>
+  );
+}
+
+const PX_PER_MIN = 0.9;
+
+function WeekCalendar({ reloadKey, blocks, onAdd, onEdit, go, setupPending }) {
+  const [start, setStart] = useState(() => mondayOf(localISODate()));
+  const [week, setWeek] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    setError('');
+    api(`/api/calendar/week?start=${start}`).then(setWeek).catch(err => setError(err.message));
+  }, [start, reloadKey]);
+
+  const openDays = (week?.days || []).filter(d => !d.hours.closed);
+  const from = openDays.length ? Math.floor(Math.min(...openDays.map(d => minutesOf(d.hours.open))) / 60) * 60 : 9 * 60;
+  const to = openDays.length ? Math.ceil(Math.max(...openDays.map(d => minutesOf(d.hours.close))) / 60) * 60 : 18 * 60;
+  const hours = [];
+  for (let m = from; m < to; m += 60) hours.push(m);
+  const height = (to - from) * PX_PER_MIN;
+  const y = min => (Math.max(from, Math.min(to, min)) - from) * PX_PER_MIN;
+
+  const label = week ? `${fmtDate(week.days[0].date, { month: 'short', day: 'numeric' })} to ${fmtDate(week.days[6].date, { month: 'short', day: 'numeric', year: 'numeric' })}` : '';
+
+  const clickDay = (day, e) => {
+    if (setupPending) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const min = from + Math.floor((e.clientY - rect.top) / PX_PER_MIN / 30) * 30;
+    onAdd({ start_date: day.date, start_time: hhmmOf(min), end_time: hhmmOf(Math.min(min + 60, 24 * 60 - 1)) });
+  };
+
+  // Side-by-side lanes, only within each group of overlapping items
+  const layout = items => {
+    const sorted = items.map(it => ({ ...it })).sort((a, b) => a.start - b.start || b.end - a.end);
+    const out = [];
+    let group = [], groupEnd = -1, lanes = [];
+    const flush = () => { group.forEach(it => { it.lanes = lanes.length; out.push(it); }); group = []; lanes = []; };
+    for (const it of sorted) {
+      if (group.length && it.start >= groupEnd) flush();
+      let lane = lanes.findIndex(end => end <= it.start);
+      if (lane === -1) { lane = lanes.length; lanes.push(it.end); } else lanes[lane] = it.end;
+      it.lane = lane;
+      group.push(it);
+      groupEnd = Math.max(groupEnd, it.end);
+    }
+    flush();
+    return out;
+  };
+
+  return (
+    <Card title="Your week"
+      description={<>You're bookable when you're open (<button className="btn-link" onClick={() => go('settings', 'hours')}>Hours</button>), not blocked off, not busy in Google Calendar, and someone is free. Click an empty time to block it.</>}
+      action={<div className="row">
+        <button className="btn btn--secondary btn--sm btn--icon" aria-label="Previous week" onClick={() => setStart(s => isoAddDays(s, -7))}><Icon name="back" /></button>
+        <button className="btn btn--secondary btn--sm" onClick={() => setStart(mondayOf(localISODate()))}>This week</button>
+        <button className="btn btn--secondary btn--sm btn--icon" aria-label="Next week" onClick={() => setStart(s => isoAddDays(s, 7))}><Icon name="arrow" /></button>
+      </div>}
+      flush>
+      {error ? <div className="card-body"><Notice type="error">{error}</Notice></div> : !week ? <Spinner /> : (
+        <>
+          <div className="week-label">{label}</div>
+          <div className="week-scroll">
+            <div className="week-grid" style={{ '--week-h': `${height}px` }}>
+              <div className="week-corner"></div>
+              {week.days.map((d, i) => (
+                <div key={d.date} className={`week-dayhead ${d.date === week.today ? 'is-today' : ''}`}>
+                  <span>{WEEKDAY_SHORT[i]}</span>
+                  <strong>{Number(d.date.slice(8))}</strong>
+                </div>
+              ))}
+              <div className="week-times">
+                {hours.map(m => <div key={m} className="week-time" style={{ top: y(m) }}>{shortTime(m)}</div>)}
+              </div>
+              {week.days.map(d => {
+                const open = minutesOf(d.hours.open), close = minutesOf(d.hours.close);
+                const items = layout([
+                  ...d.busy.map((b, i) => ({ ...b, key: 'g' + i, kind: 'busy' })),
+                  ...d.blocks.map((b, i) => ({ ...b, key: 'k' + i, kind: 'block' })),
+                  ...d.bookings.map(b => ({ ...b, key: 'b' + b.id, kind: 'booking' })),
+                ].filter(it => it.end > from && it.start < to));
+                return (
+                  <div key={d.date} className={`week-day ${d.hours.closed ? 'is-closed' : ''}`} onClick={e => clickDay(d, e)}
+                    title={setupPending ? '' : 'Click to block this time'}>
+                    {hours.map(m => <div key={m} className="week-line" style={{ top: y(m) }}></div>)}
+                    {d.hours.closed ? <div className="week-closed">Closed</div> : (
+                      <>
+                        {open > from && <div className="week-off" style={{ top: 0, height: y(open) }}></div>}
+                        {close < to && <div className="week-off" style={{ top: y(close), bottom: 0 }}></div>}
+                      </>
+                    )}
+                    {items.map(it => {
+                      const blockRow = it.kind === 'block' ? blocks.find(b => b.id === it.id) : null;
+                      const title = it.kind === 'booking' ? (it.name || 'Booking') : it.kind === 'block' ? (it.note || 'Blocked') : 'Busy in Google Calendar';
+                      const sub = it.kind === 'booking' ? [it.service, it.member].filter(Boolean).join(' · ') : (it.member || (it.kind === 'block' ? 'Whole shop' : ''));
+                      const short = y(it.end) - y(it.start) < 36;
+                      return (
+                        <button key={it.key} type="button"
+                          className={`week-item week-item--${it.kind} ${short ? 'is-short' : ''}`}
+                          style={{ top: y(it.start), height: Math.max(18, y(it.end) - y(it.start) - 2), left: `calc(${(100 / it.lanes) * it.lane}% + 2px)`, width: `calc(${100 / it.lanes}% - 4px)` }}
+                          onClick={e => { e.stopPropagation(); if (blockRow) onEdit(blockRow); }}
+                          title={`${title}${sub ? ' · ' + sub : ''} · ${shortTime(it.start)} to ${shortTime(it.end)}`}>
+                          <span className="week-item-title">{title}</span>
+                          {sub && <span className="week-item-sub">{sub}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="week-legend">
+            <span><i className="lg lg--booking"></i>Booked</span>
+            <span><i className="lg lg--block"></i>Blocked</span>
+            {week.google.connected && <span><i className="lg lg--busy"></i>Busy in Google Calendar</span>}
+            <span><i className="lg lg--off"></i>Closed</span>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function BlockedTimeList({ blocks, setupPending, onAdd, onEdit, onDeleted }) {
+  const toast = useToast();
+  const [toDelete, setToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const today = localISODate();
+  const current = blocks.filter(b => !b.end_date || b.end_date >= today);
+
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await api(`/api/calendar/blocks/${toDelete.id}`, { method: 'DELETE' });
+      toast('Blocked time removed');
+      setToDelete(null);
+      onDeleted();
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setDeleting(false); }
+  };
+
+  return (
+    <Card title="Blocked time" description="Times the AI receptionist won't book, like a lunch break, a day off or holidays."
+      action={<button className="btn btn--primary btn--sm" onClick={onAdd} disabled={setupPending}><Icon name="plus" />Block time</button>} flush>
+      {setupPending ? (
+        <div className="card-body"><Notice>Blocked time is being set up for your account. Check back in a few minutes.</Notice></div>
+      ) : current.length === 0 ? (
+        <EmptyState icon="calendar" title="Nothing blocked" sub="You're bookable whenever you're open. Block time for breaks, days off or holidays." />
+      ) : (
+        <div className="list-rows">
+          {current.map(b => {
+            const d = describeBlock(b);
+            return (
+              <div key={b.id} className="list-row block-row">
+                <div style={{ minWidth: 0 }}>
+                  <div className="cell-name">{b.note || 'Blocked'}</div>
+                  <div className="cell-sub">{d.when} · {d.time}{d.range ? ` · ${d.range}` : ''}</div>
+                </div>
+                <span className={`badge ${b.team_member ? 'badge--blue' : ''}`}>{b.team_member || 'Whole shop'}</span>
+                {b.repeat === 'weekly' ? <span className="badge badge--outline">Weekly</span> : <span></span>}
+                <div className="list-actions">
+                  <button className="btn btn--ghost btn--sm btn--icon" aria-label="Edit" title="Edit" onClick={() => onEdit(b)}><Icon name="edit" /></button>
+                  <button className="btn btn--ghost btn--sm btn--icon" aria-label="Remove" title="Remove" onClick={() => setToDelete(b)}><Icon name="trash" /></button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {toDelete && (
+        <ConfirmDialog title="Remove this blocked time?" confirmLabel="Remove" busy={deleting} onCancel={() => setToDelete(null)} onConfirm={remove}>
+          Customers will be able to book these times again (if you're open).
+        </ConfirmDialog>
+      )}
+    </Card>
+  );
+}
+
+function BlockDialog({ block, members, onClose, onSaved }) {
+  const isEdit = !!block.id;
+  const today = localISODate();
+  const startDate = block.start_date || today;
+  const [form, setForm] = useState({
+    repeat: block.repeat || 'none',
+    start_date: startDate,
+    end_date: block.end_date || (block.repeat === 'weekly' ? '' : startDate),
+    all_day: isEdit ? !block.start_time : false, // new blocks default to a timed break
+    start_time: block.start_time ? block.start_time.slice(0, 5) : '12:00',
+    end_time: block.end_time ? block.end_time.slice(0, 5) : '13:00',
+    weekdays: block.weekdays && block.weekdays.length ? block.weekdays.map(Number) : [((new Date(startDate + 'T12:00:00').getDay() + 6) % 7) + 1],
+    team_member: block.team_member || '',
+    note: block.note || '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const toggleDay = d => set('weekdays', form.weekdays.includes(d) ? form.weekdays.filter(x => x !== d) : [...form.weekdays, d].sort());
+
+  const save = async e => {
+    e.preventDefault();
+    setError('');
+    if (!form.all_day && form.end_time <= form.start_time) { setError('The end time must be after the start time.'); return; }
+    if (form.repeat === 'weekly' && !form.weekdays.length) { setError('Pick at least one day.'); return; }
+    if (form.repeat === 'none' && form.end_date && form.end_date < form.start_date) { setError('The end date must be on or after the start date.'); return; }
+    setSaving(true);
+    const body = {
+      repeat: form.repeat,
+      start_date: form.start_date,
+      end_date: form.end_date || null,
+      all_day: form.all_day,
+      start_time: form.all_day ? null : form.start_time,
+      end_time: form.all_day ? null : form.end_time,
+      weekdays: form.repeat === 'weekly' ? form.weekdays : [],
+      team_member: form.team_member || null,
+      note: form.note.trim() || null,
+    };
+    try {
+      await api(isEdit ? `/api/calendar/blocks/${block.id}` : '/api/calendar/blocks', { method: isEdit ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title={isEdit ? 'Edit blocked time' : 'Block time'} onClose={onClose} actions={<>
+      <button className="btn btn--secondary" onClick={onClose} disabled={saving}>Cancel</button>
+      <button className="btn btn--primary" form="block-form" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
+    </>}>
+      <form id="block-form" className="stack block-form" style={{ gap: 16 }} onSubmit={save}>
+        <div className="segmented" role="tablist" aria-label="Repeat">
+          <button type="button" role="tab" aria-selected={form.repeat === 'none'} className={`segment ${form.repeat === 'none' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, repeat: 'none', end_date: f.end_date || f.start_date }))}>One time</button>
+          <button type="button" role="tab" aria-selected={form.repeat === 'weekly'} className={`segment ${form.repeat === 'weekly' ? 'active' : ''}`} onClick={() => setForm(f => ({ ...f, repeat: 'weekly', end_date: '' }))}>Every week</button>
+        </div>
+
+        {form.repeat === 'weekly' && (
+          <Field label="On these days">
+            <div className="day-chips">
+              {WEEKDAY_SHORT.map((d, i) => (
+                <button key={d} type="button" className={`day-chip ${form.weekdays.includes(i + 1) ? 'active' : ''}`} aria-pressed={form.weekdays.includes(i + 1)} onClick={() => toggleDay(i + 1)}>{d}</button>
+              ))}
+            </div>
+          </Field>
+        )}
+
+        <div className="form-grid">
+          <Field label={form.repeat === 'weekly' ? 'Starting' : 'From'} htmlFor="blk-start">
+            <input id="blk-start" className="input" type="date" required value={form.start_date}
+              onChange={e => setForm(f => ({ ...f, start_date: e.target.value, end_date: f.repeat === 'none' && (!f.end_date || f.end_date < e.target.value) ? e.target.value : f.end_date }))} />
+          </Field>
+          <Field label={form.repeat === 'weekly' ? 'Until' : 'To'} optional={form.repeat === 'weekly'} htmlFor="blk-end">
+            <input id="blk-end" className="input" type="date" min={form.start_date} required={form.repeat === 'none'} value={form.end_date} onChange={e => set('end_date', e.target.value)} />
+          </Field>
+        </div>
+
+        <SwitchRow id="blk-allday" title="All day" checked={form.all_day} onChange={v => set('all_day', v)} />
+        {!form.all_day && (
+          <div className="form-grid">
+            <Field label="Start time" htmlFor="blk-st"><input id="blk-st" className="input" type="time" step="900" required value={form.start_time} onChange={e => set('start_time', e.target.value)} /></Field>
+            <Field label="End time" htmlFor="blk-et"><input id="blk-et" className="input" type="time" step="900" required value={form.end_time} onChange={e => set('end_time', e.target.value)} /></Field>
+          </div>
+        )}
+
+        <div className="form-grid">
+          {members.length > 1 && (
+            <Field label="Who" htmlFor="blk-who">
+              <select id="blk-who" className="select" value={form.team_member} onChange={e => set('team_member', e.target.value)}>
+                <option value="">Whole shop</option>
+                {members.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </Field>
+          )}
+          <Field label="Label" optional htmlFor="blk-note" className={members.length > 1 ? '' : 'span-2'}>
+            <input id="blk-note" className="input" maxLength={120} placeholder="e.g. Lunch, Holidays" value={form.note} onChange={e => set('note', e.target.value)} />
+          </Field>
+        </div>
+        {error && <Notice type="error">{error}</Notice>}
+      </form>
+    </Modal>
   );
 }
 

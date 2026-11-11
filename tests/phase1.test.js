@@ -215,15 +215,11 @@ test('{{services}} replaced with formatted services, no placeholder remains', ()
   assert.ok(!result.includes('{{services}}'));
 });
 
-test('{{currentDateTime}} is NOT replaced by createVapiAssistant (Vapi substitutes at runtime)', () => {
-  // This placeholder must survive into the created assistant — Vapi fills it on each call
-  const prompt = 'The time is {{currentDateTime}}.';
-  // Simulate the substitutions createVapiAssistant does — currentDateTime should remain
-  const result = prompt
-    .replace(/\{\{businessName\}\}/g, "Sam's Barbershop")
-    .replace(/\{\{businessLocation\}\}/g, 'Toronto, Canada')
-    .replace(/\{\{timezoneLabel\}\}/g, 'Eastern Time (ET)');
-  assert.ok(result.includes('{{currentDateTime}}'), '{{currentDateTime}} must remain for Vapi runtime');
+test('{{currentDateTime}} is replaced with Vapi\'s {{"now" | date}} variable (Vapi has no currentDateTime)', () => {
+  const { buildSystemPrompt } = require('../server/vapiService');
+  const prompt = buildSystemPrompt({ name: "Sam's Barbershop", timezone: 'America/Toronto', business_hours: {} });
+  assert.ok(!prompt.includes('{{currentDateTime}}'));
+  assert.ok(prompt.includes('{{"now" | date:'));
 });
 
 test('{{supportedLanguages}} replaced with en for English-only business', () => {

@@ -19,7 +19,8 @@ const { createClient } = require('@supabase/supabase-js');
 const { extractFromToolCall, extractBookingInfo, findBusiness, saveBooking } = require('./bookingService');
 const { sendCustomerSMS, sendOwnerEmail, sendWelcomeEmail, sendInternalSignupNotification, sendPaymentFailedEmail } = require('./notificationService');
 const { sendDueReminders, maybeScheduleReminder } = require('./reminderService');
-const { getAuthUrl, getTokensFromCode, createCalendarEvent } = require('./calendarService');
+const { getAuthUrl, getTokensFromCode, createCalendarEvent, getPrimaryCalendarEmail } = require('./calendarService');
+const { handleCheckAvailability, checkBeforeBooking } = require('./callTools');
 const stripe = require('stripe')(
   process.env.TEST_MODE === 'true'
     ? process.env.STRIPE_TEST_SECRET_KEY
@@ -41,6 +42,7 @@ const queueService = require('./queueService');
 const bookingPageRoutes = require('./bookingPageRoutes');
 const logoRoutes = require('./logoRoutes');
 const exportRoutes = require('./exportRoutes');
+const calendarRoutes = require('./calendarRoutes');
 
 const app = express();
 
@@ -313,6 +315,7 @@ app.use(authRoutes);
 app.use(bookingPageRoutes);
 app.use(logoRoutes);
 app.use(exportRoutes);
+app.use(calendarRoutes);
 app.use(dashboardRoutes);
 app.use(intelRoutes);
 
@@ -353,37 +356,62 @@ app.post('/webhook/booking', async (req, res) => {
 
     // ── Type A: Custom Tool Call ──────────────────────────────────────────────
     if (messageType === 'tool-calls') {
-      console.log('Tool call received: bookAppointment');
-      console.log('Full tool call body:', JSON.stringify(req.body?.message, null, 2));
-
       const toolCalls = message.toolCallList || message.toolCalls || [];
-      const toolCall = toolCalls.find(tc => tc.function?.name === 'bookAppointment');
-
-      if (!toolCall) {
-        return res.status(200).json({ results: [] });
-      }
-
-      // Parse JSON arguments string
-      const toolCallArgs = typeof toolCall.function.arguments === 'string'
-        ? JSON.parse(toolCall.function.arguments)
-        : toolCall.function.arguments;
+      console.log('Tool calls received:', toolCalls.map(tc => tc.function?.name).join(', '));
 
       const phoneNumber = message.call?.customer?.number;
       const assistantId = message.call?.assistantId;
       const callId = message.call?.id;
+      const parseArgs = tc => {
+        const a = tc.function?.arguments;
+        if (typeof a !== 'string') return a || {};
+        try { return JSON.parse(a); } catch { return {}; }
+      };
 
-      const business = await findBusiness(phoneNumber, assistantId);
+      const business = toolCalls.length ? await findBusiness(phoneNumber, assistantId) : null;
       if (!business) {
         console.log('⚠️  Business not found for phone:', phoneNumber);
         return res.status(200).json({
-          results: [{ toolCallId: toolCall.id, result: 'Error: business not found' }]
+          results: toolCalls.map(tc => ({ toolCallId: tc.id, result: 'Error: business not found' }))
         });
       }
-
       console.log(`✅ Found business: ${business.name}`);
 
+      // checkAvailability: answer every availability question from the live calendar
+      const results = [];
+      for (const tc of toolCalls.filter(t => t.function?.name === 'checkAvailability')) {
+        const args = parseArgs(tc);
+        let result;
+        try {
+          result = await handleCheckAvailability(business, args);
+        } catch (err) {
+          console.error('❌ checkAvailability failed:', err.message);
+          result = "I couldn't check the schedule just now. Tell the caller you'll book their preferred time and the shop will text to confirm, then call bookAppointment.";
+        }
+        console.log('📅 checkAvailability', JSON.stringify(args), '→', result);
+        results.push({ toolCallId: tc.id, result });
+      }
+
+      const toolCall = toolCalls.find(tc => tc.function?.name === 'bookAppointment');
+      if (!toolCall) {
+        return res.status(200).json({ results });
+      }
+
+      const toolCallArgs = parseArgs(toolCall);
       const bookingData = extractFromToolCall(toolCallArgs);
       console.log('Extracted booking data:', bookingData);
+
+      // Re-check right before saving so two callers can't take the same time
+      const slot = await checkBeforeBooking(business, {
+        date: bookingData.date, time: bookingData.time, service: bookingData.service, preferredBarber: bookingData.preferredBarber,
+      });
+      if (!slot.ok) {
+        console.log('🚫 Booking refused, time not available:', bookingData.date, bookingData.time);
+        results.push({ toolCallId: toolCall.id, result: slot.message });
+        return res.status(200).json({ results });
+      }
+      if (slot.durationMinutes) bookingData.durationMinutes = slot.durationMinutes;
+      if (slot.teamMember) bookingData.preferredBarber = slot.teamMember;
 
       const depositStatus = business.deposit_enabled ? 'pending' : 'none';
       const savedBooking = await saveBooking(business, bookingData, callId, depositStatus);
@@ -403,9 +431,8 @@ app.post('/webhook/booking', async (req, res) => {
       }
 
       // Respond to Vapi so the tool call resolves
-      return res.status(200).json({
-        results: [{ toolCallId: toolCall.id, result: 'Booking confirmed successfully' }]
-      });
+      results.push({ toolCallId: toolCall.id, result: 'Booking confirmed successfully' });
+      return res.status(200).json({ results });
     }
 
     // ── Type B: End-of-Call Report (regex fallback) ───────────────────────────
@@ -421,6 +448,20 @@ app.post('/webhook/booking', async (req, res) => {
       }
 
       console.log(`✅ Found business: ${business.name}`);
+
+      // The bookAppointment tool is the source of truth. If it was used on this
+      // call (booked, or refused because the time was taken), don't re-create a
+      // booking from the transcript.
+      if (JSON.stringify(message).includes('bookAppointment')) {
+        console.log('ℹ️  End-of-call report: booking handled by the bookAppointment tool, skipping fallback');
+        return res.status(200).json({ success: true, skipped: 'handled_by_tool' });
+      }
+      if (callId) {
+        const { data: existing } = await supabase.from('bookings').select('id').eq('vapi_call_id', callId).limit(1);
+        if (existing && existing.length) {
+          return res.status(200).json({ success: true, skipped: 'already_saved' });
+        }
+      }
 
       const bookingData = extractBookingInfo(req.body);
       console.log('Extracted booking data:', bookingData);
@@ -480,8 +521,48 @@ app.get('/auth/google', async (req, res) => {
 
 // Google OAuth - callback
 app.get('/auth/google/callback', async (req, res) => {
-  const { code, state: businessId } = req.query;
+  const { code, state = '', error: oauthError } = req.query;
 
+  // Dashboard "Connect Google Calendar" button: state is 'cal.' + signed JWT
+  if (String(state).startsWith('cal.')) {
+    const back = status => res.redirect(303, `/dashboard/?calendar=${status}#/settings/calendar`);
+    let payload;
+    try {
+      payload = require('jsonwebtoken').verify(String(state).slice(4), process.env.JWT_SECRET);
+      if (payload.purpose !== 'calendar-connect' || !payload.businessId) throw new Error('wrong purpose');
+    } catch (err) {
+      console.warn('⚠️  Calendar connect: bad or expired state:', err.message);
+      return back('expired');
+    }
+    if (oauthError || !code) return back('cancelled');
+    try {
+      const tokens = await getTokensFromCode(code);
+      if (!tokens.refresh_token) {
+        console.warn('⚠️  Calendar connect: Google returned no refresh token for', payload.businessId);
+        return back('failed');
+      }
+      const email = await getPrimaryCalendarEmail(tokens);
+      const updates = {
+        google_access_token: tokens.access_token,
+        google_refresh_token: tokens.refresh_token,
+        google_token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+      };
+      let { error } = await supabase.from('businesses').update({ ...updates, google_calendar_email: email }).eq('id', payload.businessId);
+      if (error && /google_calendar_email/.test(error.message || '')) {
+        // Column not migrated yet — save the connection without the email
+        ({ error } = await supabase.from('businesses').update(updates).eq('id', payload.businessId));
+      }
+      if (error) throw error;
+      console.log('✅ Google Calendar connected from dashboard for business:', payload.businessId);
+      return back('connected');
+    } catch (err) {
+      console.error('❌ Calendar connect failed:', err.message);
+      return back('failed');
+    }
+  }
+
+  // Legacy admin link (/auth/google?businessId=...): state is the business id
+  const businessId = state;
   try {
     const tokens = await getTokensFromCode(code);
 

@@ -12,7 +12,9 @@ const supabase = createClient(
   process.env.SUPABASE_KEY
 );
 
-// Create OAuth2 client
+const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar';
+
+// Create OAuth2 client (redirect URI is registered in Google Cloud Console)
 function getOAuthClient() {
   return new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -21,17 +23,19 @@ function getOAuthClient() {
   );
 }
 
-// Generate authorization URL for a business to connect their calendar
-function getAuthUrl(businessId) {
+// Consent URL. `state` identifies the shop on the way back; the dashboard
+// passes a signed token ('cal.<jwt>'), the legacy admin link a business id.
+// prompt=consent makes Google return a refresh token every time.
+function getAuthUrl(state, { loginHint } = {}) {
   const oauth2Client = getOAuthClient();
-  
-  const url = oauth2Client.generateAuthUrl({
+  return oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/calendar'],
-    state: businessId // Pass business ID to identify which business is connecting
+    prompt: 'consent',
+    include_granted_scopes: true,
+    scope: [CALENDAR_SCOPE],
+    state,
+    ...(loginHint ? { login_hint: loginHint } : {}),
   });
-  
-  return url;
 }
 
 // Exchange authorization code for tokens
@@ -41,122 +45,106 @@ async function getTokensFromCode(code) {
   return tokens;
 }
 
-// Create calendar event
+// The Google account (primary calendar id is the account's email) for fresh tokens
+async function getPrimaryCalendarEmail(tokens) {
+  try {
+    const oauth2Client = getOAuthClient();
+    oauth2Client.setCredentials(tokens);
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+    const res = await calendar.calendars.get({ calendarId: 'primary' });
+    return res.data.id || null;
+  } catch (err) {
+    console.warn('⚠️  Could not read primary calendar id:', err.message);
+    return null;
+  }
+}
+
+// Revoke Bimbly's access at Google (best effort; we clear our copy regardless)
+async function revokeTokens(business) {
+  const token = business.google_refresh_token || business.google_access_token;
+  if (!token) return;
+  try {
+    await getOAuthClient().revokeToken(token);
+  } catch (err) {
+    console.warn('⚠️  Google token revoke failed (clearing locally anyway):', err.message);
+  }
+}
+
+// Authorised Calendar API client for a shop. Saves refreshed tokens.
+async function getCalendarClient(business) {
+  if (!business.google_access_token || !business.google_refresh_token) {
+    throw new Error('Google Calendar is not connected.');
+  }
+  const oauth2Client = getOAuthClient();
+  oauth2Client.setCredentials({
+    access_token: business.google_access_token,
+    refresh_token: business.google_refresh_token,
+  });
+  oauth2Client.on('tokens', async tokens => {
+    try {
+      await supabase.from('businesses').update({
+        ...(tokens.access_token ? { google_access_token: tokens.access_token } : {}),
+        ...(tokens.refresh_token ? { google_refresh_token: tokens.refresh_token } : {}),
+        google_token_expiry: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : null,
+      }).eq('id', business.id);
+    } catch (err) {
+      console.warn('⚠️  Could not save refreshed Google token:', err.message);
+    }
+  });
+  return google.calendar({ version: 'v3', auth: oauth2Client });
+}
+
+// Create calendar event for a booking in the shop's connected calendar
 async function createCalendarEvent(business, booking) {
   try {
-    console.log('📅 Attempting to create calendar event for booking:', booking.id);
-
-    // Check if business has connected their calendar
     if (!business.google_access_token || !business.google_refresh_token) {
       console.log('⚠️  Business has not connected Google Calendar — skipping calendar event');
-      console.log('   Access token present:', !!business.google_access_token);
-      console.log('   Refresh token present:', !!business.google_refresh_token);
       return null;
     }
 
-    console.log('   Refresh token present: yes');
-    console.log('   Access token present: yes');
-    console.log('   Token expiry:', business.google_token_expiry || 'not stored');
+    const calendar = await getCalendarClient(business);
+    const tz = business.timezone || 'America/Toronto';
 
-    // Set up OAuth client with stored tokens
-    const oauth2Client = getOAuthClient();
-    oauth2Client.setCredentials({
-      access_token: business.google_access_token,
-      refresh_token: business.google_refresh_token
-    });
-
-    oauth2Client.on('tokens', async (tokens) => {
-      console.log('🔄 Google token refreshed');
-      if (tokens.refresh_token) {
-        // Update refresh token in database
-        await supabase
-          .from('businesses')
-          .update({
-            google_access_token: tokens.access_token,
-            google_token_expiry: new Date(tokens.expiry_date).toISOString()
-          })
-          .eq('id', business.id);
-        console.log('✅ Updated tokens in database');
-      }
-    });
-
-    await oauth2Client.getAccessToken();
-    console.log('✅ Access token refreshed successfully');
-
-    // Initialize Calendar API
-    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-
-    // Parse date and time - database already has ISO format
-    const dateTimeString = `${booking.appointment_date}T${booking.appointment_time}`;
-    console.log('   Parsing date/time string:', dateTimeString);
-    const appointmentDateTime = DateTime.fromISO(dateTimeString, { zone: 'America/Toronto' });
-
-    if (!appointmentDateTime.isValid) {
-      console.error('❌ Invalid date/time:', appointmentDateTime.invalidReason);
-      console.error('   Attempted to parse:', dateTimeString);
+    const time = String(booking.appointment_time || '').slice(0, 5);
+    const start = DateTime.fromISO(`${booking.appointment_date}T${time}`, { zone: tz });
+    if (!start.isValid) {
+      console.error('❌ Invalid booking date/time for calendar event:', booking.appointment_date, booking.appointment_time);
       return null;
     }
+    const end = start.plus({ minutes: booking.duration_minutes || 30 });
+    const services = Array.isArray(booking.service_ids) ? booking.service_ids : [booking.service_ids].filter(Boolean);
 
-    // Calculate end time
-    const endDateTime = appointmentDateTime.plus({ minutes: booking.duration_minutes || 30 });
-
-    // Create event
     const event = {
-      summary: `${booking.service_ids.join(' & ')} - ${booking.customer_name}`,
+      summary: `${services.join(' & ') || 'Appointment'} - ${booking.customer_name}`,
       description: `
 Customer: ${booking.customer_name}
 Phone: ${booking.customer_phone}
-Service: ${booking.service_ids.join(' & ')}
+Service: ${services.join(' & ')}
 Special Requests: ${booking.special_requests || 'None'}
-Preferred Barber: ${booking.preferred_barber || 'No preference'}
+Team member: ${booking.preferred_barber || 'No preference'}
 New Customer: ${booking.is_new_customer ? 'Yes' : 'No'}
 
-Booked via BookingAgent
+Booked by Bimbly
       `.trim(),
-      start: {
-        dateTime: appointmentDateTime.toISO(),
-        timeZone: 'America/Toronto'
-      },
-      end: {
-        dateTime: endDateTime.toISO(),
-        timeZone: 'America/Toronto'
-      },
+      start: { dateTime: start.toISO(), timeZone: tz },
+      end: { dateTime: end.toISO(), timeZone: tz },
+      // Lets the availability check skip events Bimbly created for its own bookings
+      extendedProperties: { private: { bimblyBookingId: String(booking.id) } },
       attendees: booking.customer_email ? [{ email: booking.customer_email }] : [],
-      reminders: {
-        useDefault: false,
-        overrides: [
-          { method: 'email', minutes: 24 * 60 },
-          { method: 'popup', minutes: 30 }
-        ]
-      }
+      reminders: { useDefault: false, overrides: [{ method: 'email', minutes: 24 * 60 }, { method: 'popup', minutes: 30 }] },
     };
 
-    console.log('   Event details:', JSON.stringify({
-      summary: event.summary,
-      start: event.start,
-      end: event.end
-    }, null, 2));
-
-    const response = await calendar.events.insert({
-      calendarId: 'primary',
-      resource: event
-    });
-
+    const response = await calendar.events.insert({ calendarId: 'primary', resource: event });
     console.log('📅 Calendar event created:', response.data.id);
 
-    // Update booking with calendar event ID
     await supabase
       .from('bookings')
       .update({ google_calendar_event_id: response.data.id })
       .eq('id', booking.id);
 
     return response.data.id;
-
   } catch (error) {
     console.error('❌ Calendar error:', error.message);
-    if (error.response?.data) {
-      console.error('   Google API response:', JSON.stringify(error.response.data, null, 2));
-    }
     if (error.message?.includes('invalid_grant') || error.message?.includes('Token has been expired')) {
       console.error('   ⚠️  Google token is expired or revoked — business needs to reconnect calendar');
     }
@@ -168,38 +156,14 @@ Booked via BookingAgent
 // Fails open — returns [] on any error so booking availability still works without a calendar.
 async function getFreeBusy(business, calendarId, date, timezone) {
   if (!business.google_access_token || !business.google_refresh_token) return [];
-
   try {
-    const oauth2Client = getOAuthClient();
-    oauth2Client.setCredentials({
-      access_token:  business.google_access_token,
-      refresh_token: business.google_refresh_token,
-    });
-
-    oauth2Client.on('tokens', async (tokens) => {
-      await supabase.from('businesses').update({
-        google_access_token: tokens.access_token,
-        ...(tokens.refresh_token ? { google_refresh_token: tokens.refresh_token } : {}),
-        google_token_expiry: tokens.expiry_date
-          ? new Date(tokens.expiry_date).toISOString() : null,
-      }).eq('id', business.id);
-    });
-
-    await oauth2Client.getAccessToken();
-
-    const tz       = timezone || 'America/Toronto';
+    const calendar = await getCalendarClient(business);
+    const tz = timezone || 'America/Toronto';
     const dayStart = DateTime.fromISO(date, { zone: tz }).startOf('day');
-    const dayEnd   = dayStart.endOf('day');
-
-    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+    const dayEnd = dayStart.endOf('day');
     const response = await calendar.freebusy.query({
-      requestBody: {
-        timeMin: dayStart.toISO(),
-        timeMax: dayEnd.toISO(),
-        items:   [{ id: calendarId }],
-      },
+      requestBody: { timeMin: dayStart.toISO(), timeMax: dayEnd.toISO(), items: [{ id: calendarId }] },
     });
-
     const busy = response.data.calendars?.[calendarId]?.busy || [];
     return busy.map(b => ({ start: new Date(b.start), end: new Date(b.end) }));
   } catch (err) {
@@ -211,6 +175,9 @@ async function getFreeBusy(business, calendarId, date, timezone) {
 module.exports = {
   getAuthUrl,
   getTokensFromCode,
+  getPrimaryCalendarEmail,
+  getCalendarClient,
+  revokeTokens,
   createCalendarEvent,
   getFreeBusy,
 };

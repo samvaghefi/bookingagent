@@ -40,9 +40,10 @@ const BOOKING_RECORD = {
 
 function chain(result) {
   const self = {};
-  ['select','eq','neq','or','order','gte','lte','in','limit'].forEach(m => {
+  ['select','eq','neq','or','order','gte','lte','in','limit','not'].forEach(m => {
     self[m] = () => chain(result);
   });
+  self.then = (res, rej) => Promise.resolve(result).then(res, rej); // awaitable like a real query
   self.single      = () => Promise.resolve(result);
   self.maybeSingle = () => Promise.resolve(result);
   self.insert      = () => chain(result);  // supports .insert().select().single()
@@ -187,8 +188,8 @@ function availabilityApp(bizOverride = {}) {
   const supabase = {
     from: (table) => {
       if (table === 'businesses') return chain({ data: biz, error: null });
-      if (table === 'bookings')   return { select: () => ({ eq: () => ({ eq: () => ({ neq: () => Promise.resolve({ data: [], error: null }) }) }) }) };
-      return chain({ data: null, error: null });
+      if (table === 'bookings')   return chain({ data: [], error: null });
+      return chain({ data: [], error: null });
     },
   };
   return buildApp(supabase);
@@ -242,10 +243,12 @@ describe('GET /api/book/:businessId/availability', () => {
     });
   });
 
-  test('returns closed:true for a day not in business_hours', () => {
-    // Wednesday not in BUSINESS.business_hours → closed
+  test('a day with no saved hours uses the Settings → Hours default (9 AM to 6 PM)', () => {
+    // Wednesday not in BUSINESS.business_hours → same default the dashboard shows
     return request(availabilityApp()).get(`/api/book/biz-123/availability?date=${NEXT_WEDNESDAY}&duration=30`).then(res => {
-      expect(res.body.closed).toBe(true);
+      expect(res.body.closed).toBe(false);
+      expect(res.body.slots[0].time).toBe('09:00');
+      expect(res.body.slots[res.body.slots.length - 1].time).toBe('17:30');
     });
   });
 
@@ -264,7 +267,7 @@ const VALID_BODY = {
   customerPhone:   '+14165550000',
   customerEmail:   'john@example.com',
   service:         "Men's Haircut",
-  appointmentDate: '2026-03-24',
+  appointmentDate: TUESDAY_DATE, // upcoming Tuesday: open 9–6, nothing booked
   appointmentTime: '10:00',
   duration_minutes: 30,
 };
@@ -276,6 +279,7 @@ function bookingApp(bizOverride = {}) {
       if (table === 'businesses') return chain({ data: biz, error: null });
       if (table === 'bookings') {
         return {
+          ...chain({ data: [], error: null }), // availability re-check: no existing bookings
           insert: () => ({ select: () => ({ single: () => Promise.resolve({ data: BOOKING_RECORD, error: null }) }) }),
           update: () => ({ eq: () => Promise.resolve({ error: null }) }),
         };
@@ -292,6 +296,22 @@ describe('POST /api/book/:businessId', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.bookingId).toBeDefined();
+    });
+  });
+
+  test('409 when the time was just taken', () => {
+    const biz = { ...BUSINESS };
+    const taken = [{ id: 'b1', appointment_date: TUESDAY_DATE, appointment_time: '10:00:00', duration_minutes: 30, preferred_barber: null, status: 'confirmed' }];
+    const supabase = {
+      from: (table) => {
+        if (table === 'businesses') return chain({ data: biz, error: null });
+        if (table === 'bookings') return { ...chain({ data: taken, error: null }), insert: () => { throw new Error('must not insert'); } };
+        return chain({ data: [], error: null });
+      },
+    };
+    return request(buildApp(supabase)).post('/api/book/biz-123').send(VALID_BODY).then(res => {
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/just taken/);
     });
   });
 

@@ -42,15 +42,24 @@ Sam's Barbershop, Toronto
 - credentials: true, methods: GET/POST/PUT/DELETE/OPTIONS, allowedHeaders: Content-Type + Authorization
 - Preflight: app.options(/(.*)/, cors(corsOptions)) — regex required for Express 5
 
+## Availability (calls, booking page, dashboard calendar)
+- server/availabilityService.js is the single source of truth for "is this time free?": opening hours (Settings → Hours; a day with nothing saved uses 09:00–18:00, same as DEFAULT_HOURS in the dashboard), not in the past, calendar_blocks (blocked time), Google Calendar busy (primary via events.list, skipping events Bimbly created; team members' calendarId via freebusy), and per-team-member bookings ("anyone" bookings still need a free member). computeDay() is pure and unit-tested; Google errors fail open
+- Primary Google calendar = owner (team member #1) if any member has their own calendarId; otherwise it blocks the whole shop
+- server/callTools.js: replies for the Vapi tools. checkAvailability (args: date YYYY-MM-DD/today/tomorrow, time HH:MM?, service?, preferredBarber?) returns a sentence starting with today's date; bookAppointment re-checks the slot and replies "NOT BOOKED. … closest times …" instead of saving when it's taken (fails open on errors)
+- Booking page GET /api/book/:id/availability and POST /api/book/:id (409 if just taken) use the same engine
+
 ## Webhook Flow
 1. Vapi calls POST /webhook/booking
-2. If message.type === "tool-calls" → use extractFromToolCall() (structured, reliable)
-3. If message.type === "end-of-call-report" → use extractBookingInfo() (regex fallback)
+2. If message.type === "tool-calls" → checkAvailability calls answered from availabilityService; bookAppointment re-checked, then extractFromToolCall() + saveBooking (now stores duration_minutes from the service)
+3. If message.type === "end-of-call-report" → regex fallback extractBookingInfo(), skipped when the call used bookAppointment or a booking with that vapi_call_id exists
 4. findBusiness() looks up business by phone or assistant ID
 5. saveBooking() saves to Supabase bookings table
 6. Send SMS to customer, email to owner, create Google Calendar event
 
-## Vapi Custom Tool
+## Vapi Custom Tools
+- checkAvailability: created/found by name via ensureAvailabilityTool() (vapiService.js) and added to every assistant's model.toolIds by createVapiAssistant() and rebuildAndPatchVapiPrompt(). Server URL /webhook/booking
+- Roll prompt/tool changes out to existing assistants: node scripts/sync-vapi-assistants.js [--dry-run] [--business <id>]
+- {{currentDateTime}} in vapi-system-prompt.txt is replaced by buildSystemPrompt() with Vapi's {{"now" | date: "...", "<tz>"}} (Vapi has no currentDateTime variable; it rendered blank)
 - Tool ID: 97f86d72-3fc7-44bd-82f1-9b76b270023e
 - Tool name: bookAppointment
 - Server URL: https://bookingagent-gmo2.onrender.com/webhook/booking
@@ -73,7 +82,11 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - plan is stored in Stripe session metadata as a fallback
 
 ## Google Calendar
-- OAuth flow: GET /auth/google?businessId=xxx → Google login → /auth/google/callback
+- Dashboard: Settings → Calendar → "Connect Google Calendar" → POST /api/calendar/connect returns the consent URL with state 'cal.' + JWT {businessId, purpose:'calendar-connect'} (15 min) → /auth/google/callback verifies it, stores tokens + google_calendar_email, redirects to /dashboard/?calendar=connected|cancelled|expired|failed#/settings/calendar
+- server/calendarRoutes.js: GET /api/calendar/status, POST /api/calendar/connect, DELETE /api/calendar/connection (revokes at Google), GET/POST/PUT/DELETE /api/calendar/blocks, GET /api/calendar/week?start=YYYY-MM-DD
+- calendar_blocks table (scripts/migrations/add-calendar-blocks.sql): repeat 'none'|'weekly', start_date, end_date (null = weekly with no end), weekdays 1=Mon..7=Sun, start_time/end_time (null = all day), team_member (null = whole shop), note. Routes/loaders tolerate the table not existing yet
+- Calendar events are created in the shop's time zone with extendedProperties.private.bimblyBookingId
+- Legacy admin link: GET /auth/google?businessId=xxx → Google login → /auth/google/callback (state = business id)
 - Tokens stored per business in businesses table
 - To reconnect: https://bookingagent-gmo2.onrender.com/auth/google?businessId=a09fdd0b-421e-479a-b4d7-120f6a72a043
 
@@ -102,7 +115,8 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - Every settings form saves from the card footer (SaveFooter, bottom right, status message on the left). Use api() so server errors are shown; never report success without res.ok. No alert()/confirm(): use toasts (useToast) and ConfirmDialog
 - Token handling: reads ?token= on load, strips from URL, redirects to /auth/dashboard/login if missing (or on 401)
 - Hash routing: #/home, #/bookings, #/queue, #/clients[/search], #/client/<id>, #/settings/<tab>, #/billing, #/onboarding (refresh and back button work)
-- Screens: Home (greeting, stats, today's book, walk-ins, charts, recent bookings), Bookings (Upcoming/Today/7/30 days + search), Walk-ins, Clients + profile, Settings tabs (Business, Hours, Services, Team, Booking page, Deposits, Walk-ins, Account), Billing, Setup wizard
+- Screens: Home (greeting, stats, today's book, walk-ins, charts, recent bookings), Bookings (Upcoming/Today/7/30 days + search), Walk-ins, Clients + profile, Settings tabs (Business, Hours, Calendar, Services, Team, Booking page, Deposits, Walk-ins, Account), Billing, Setup wizard
+- Settings → Calendar: Google Calendar connect/disconnect, week view (hours, bookings, blocked time, Google busy; click an empty time to block it), blocked time list + add/edit dialog (one time or every week, all day or times, whole shop or one team member)
 - Mobile (<768px): sidebar becomes a slide-out menu from the top bar button
 - Sidebar logo goes to the dashboard home (#/home), not bimblyai.com
 - Billing page: current plan card, then all three plans (Solo/Starter/Pro, wording copied from bimblyai.com pricing) with Upgrade/Switch buttons on every non-current plan; plan changes are disabled when cancelling/cancelled (shop emails hello@bimblyai.com)
@@ -167,10 +181,8 @@ After EVERY change:
 Pushing to main auto-deploys to Render.
 
 ## Next Priorities
-1. Fix Vapi system prompt to use {{currentDateTime}} for accurate date handling
-2. Verify hello@bimblyai.com as a verified sender in SendGrid
+1. Verify hello@bimblyai.com as a verified sender in SendGrid
 3. Set STRIPE_WEBHOOK_SECRET in Render after creating the webhook endpoint in Stripe Dashboard
 
 ## Known Issues
-- System prompt has hardcoded date — needs {{currentDateTime}} variable
 - Preferred barber sometimes not captured correctly

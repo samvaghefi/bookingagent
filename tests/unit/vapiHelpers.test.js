@@ -205,9 +205,12 @@ describe('system prompt placeholder substitution', () => {
     expect(result).not.toContain('{{businessName}}');
   });
 
-  test('{{currentDateTime}} is NOT replaced (Vapi fills it at runtime)', () => {
-    const result = 'Time: {{currentDateTime}}.'.replace(/\{\{businessName\}\}/g, "Sam's Barbershop");
-    expect(result).toContain('{{currentDateTime}}');
+  test('{{currentDateTime}} becomes Vapi\'s "now" variable in the shop time zone', () => {
+    // Vapi has no {{currentDateTime}} variable (it rendered blank); {{"now" | date}} is filled on every call
+    const { buildSystemPrompt } = require('../../server/vapiService');
+    const prompt = buildSystemPrompt({ name: "Sam's Barbershop", timezone: 'America/Vancouver', business_hours: {} });
+    expect(prompt).not.toContain('{{currentDateTime}}');
+    expect(prompt).toContain('{{"now" | date: "%A, %B %-d, %Y, %-I:%M %p", "America/Vancouver"}}');
   });
 
   test('{{teamMembers}} is replaced, no placeholder remains', () => {

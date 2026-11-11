@@ -276,6 +276,7 @@ async function saveBooking(business, bookingData, vapiCallId, depositStatus = 'n
   if (bookingData.preferredBarber != null) record.preferred_barber = bookingData.preferredBarber;
   if (bookingData.isNewCustomer != null) record.is_new_customer = bookingData.isNewCustomer;
   if (bookingData.serviceCount != null) record.service_count = bookingData.serviceCount;
+  if (bookingData.durationMinutes) record.duration_minutes = bookingData.durationMinutes;
 
   const { data, error } = await supabase
     .from('bookings')
