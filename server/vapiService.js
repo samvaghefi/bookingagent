@@ -282,6 +282,43 @@ async function updateVapiAssistant(assistantId, business, services, barbers, { b
   return true;
 }
 
+// ── attachPhoneNumber ─────────────────────────────────────────────────────────
+// Registers a Twilio number in Vapi and links it to the assistant, so calls to
+// the number are answered. Vapi points the Twilio number at its inbound handler.
+// Safe to re-run: an already-registered number is just re-linked.
+async function attachPhoneNumber(phoneNumber, assistantId, name) {
+  if (!phoneNumber || !assistantId) throw new Error('attachPhoneNumber needs a number and an assistant');
+  let existing;
+  try {
+    const res = await axios.get(`${VAPI_BASE}/phone-number?limit=1000`, { headers: vapiHeaders(), timeout: 15000 });
+    existing = (res.data || []).find(n => n.number === phoneNumber);
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
+
+  try {
+    if (existing) {
+      if (existing.assistantId !== assistantId) {
+        await axios.patch(`${VAPI_BASE}/phone-number/${existing.id}`, { assistantId }, { headers: vapiHeaders(), timeout: 15000 });
+      }
+      console.log(`Vapi number ${phoneNumber} linked to assistant ${assistantId}`);
+      return existing.id;
+    }
+    const res = await axios.post(`${VAPI_BASE}/phone-number`, {
+      provider: 'twilio',
+      number: phoneNumber,
+      twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
+      twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
+      assistantId,
+      name: String(name || 'Bimbly').substring(0, 40),
+    }, { headers: vapiHeaders(), timeout: 20000 });
+    console.log(`Vapi number registered: ${phoneNumber} → assistant ${assistantId}`);
+    return res.data.id;
+  } catch (err) {
+    throw new Error(vapiError(err));
+  }
+}
+
 // ── deleteVapiAssistant ───────────────────────────────────────────────────────
 // Deletes a Vapi assistant — used for cleanup if provisioning fails.
 async function deleteVapiAssistant(assistantId) {
@@ -343,4 +380,4 @@ async function rebuildAndPatchVapiPrompt(business, services) {
   console.log(`Vapi prompt rebuilt for ${business.name} (${assistantId})`);
 }
 
-module.exports = { createVapiAssistant, updateVapiAssistant, deleteVapiAssistant, buildSystemPrompt, rebuildAndPatchVapiPrompt, ensureAvailabilityTool, AVAILABILITY_TOOL };
+module.exports = { createVapiAssistant, updateVapiAssistant, deleteVapiAssistant, buildSystemPrompt, rebuildAndPatchVapiPrompt, ensureAvailabilityTool, attachPhoneNumber, AVAILABILITY_TOOL };

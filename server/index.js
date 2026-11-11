@@ -32,7 +32,7 @@ const { createBusiness } = require('./signupService');
 const { validateSignup } = require('./signupValidation');
 const bcrypt = require('bcryptjs');
 const { provisionPhoneNumber, releasePhoneNumber } = require('./twilioProvisioningService');
-const { createVapiAssistant, updateVapiAssistant } = require('./vapiService');
+const { createVapiAssistant, updateVapiAssistant, attachPhoneNumber } = require('./vapiService');
 const cookieParser = require('cookie-parser');
 const session = require('express-session');
 const dashboardRoutes = require('./dashboardRoutes');
@@ -100,6 +100,11 @@ async function handleCheckoutCompleted(session) {
     // 3. Create Vapi assistant
     console.log('🤖 Creating Vapi assistant for:', business.name);
     vapiAssistantId = await createVapiAssistant(businessWithPhone);
+
+    // 3b. Register the number in Vapi and link it to the assistant, so calls get answered.
+    //     Without this the number rings into Vapi with no assistant and callers hear busy.
+    console.log('🔗 Linking phone number to assistant for:', business.name);
+    await attachPhoneNumber(twilioPhone, vapiAssistantId, business.name);
 
     // 4. Fully activate the business
     const trialEndsAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();

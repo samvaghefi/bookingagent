@@ -10,8 +10,11 @@
 
 const twilio = require('twilio');
 
-// Vapi's standard inbound call handler — Twilio posts here when a call comes in
-const VAPI_WEBHOOK_URL = 'https://api.vapi.ai/call/phone';
+// Vapi's inbound call handler for Twilio numbers — Twilio posts here when a call comes in.
+// (Not /call/phone: that's Vapi's authenticated API for placing calls and answers 401.)
+// The number must also be registered in Vapi with an assistant (attachPhoneNumber in
+// vapiService.js), otherwise Vapi doesn't know who should answer.
+const VAPI_WEBHOOK_URL = 'https://api.vapi.ai/twilio/inbound_call';
 
 // Province → preferred area codes (priority order)
 const PROVINCE_AREA_CODES = {

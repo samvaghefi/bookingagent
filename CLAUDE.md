@@ -56,6 +56,10 @@ Sam's Barbershop, Toronto
 5. saveBooking() saves to Supabase bookings table
 6. Send SMS to customer, email to owner, create Google Calendar event
 
+## Phone numbers
+- Signup (handleCheckoutCompleted): provisionPhoneNumber() buys a Twilio number with voiceUrl https://api.vapi.ai/twilio/inbound_call, createVapiAssistant(), then attachPhoneNumber() registers the number in Vapi (provider twilio) linked to the assistant. Without that last step calls get Twilio error 11200 (HTTP 401) and the caller hears busy
+- Fix an existing shop: node scripts/attach-vapi-number.js --business <id> [--dry-run] (or --all)
+
 ## Vapi Custom Tools
 - checkAvailability: created/found by name via ensureAvailabilityTool() (vapiService.js) and added to every assistant's model.toolIds by createVapiAssistant() and rebuildAndPatchVapiPrompt(). Server URL /webhook/booking
 - Roll prompt/tool changes out to existing assistants: node scripts/sync-vapi-assistants.js [--dry-run] [--business <id>]
