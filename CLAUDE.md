@@ -97,9 +97,13 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 
 ## Dashboard SPA
 - Served at GET /dashboard → dashboard/index.html
-- Static assets at /dashboard/style.css and /dashboard/app.jsx
-- Token handling: reads ?token= on load, strips from URL, redirects to /auth/dashboard/google if missing
-- Screens: Home (stats + charts + recent bookings), Bookings (filtered table), Settings (business info + hours + services + team), Billing (status + cancel), Onboarding (4-step wizard)
+- Static assets at /dashboard/style.css and /dashboard/app.jsx; API_BASE is window.location.origin (same server)
+- Design matches bimblyai.com and the login page (same tokens, fonts, logo). style.css is the design system: use .btn (--primary/--secondary/--ghost/--danger/--danger-outline, --sm), .field + .input/.select/.textarea, .card (Card component with card-head/body/foot), .switch, .badge, .notice. No inline styles for controls
+- Every settings form saves from the card footer (SaveFooter, bottom right, status message on the left). Use api() so server errors are shown; never report success without res.ok. No alert()/confirm(): use toasts (useToast) and ConfirmDialog
+- Token handling: reads ?token= on load, strips from URL, redirects to /auth/dashboard/login if missing (or on 401)
+- Hash routing: #/home, #/bookings, #/queue, #/clients[/search], #/client/<id>, #/settings/<tab>, #/billing, #/onboarding (refresh and back button work)
+- Screens: Home (greeting, stats, today's book, walk-ins, charts, recent bookings), Bookings (Upcoming/Today/7/30 days + search), Walk-ins, Clients + profile, Settings tabs (Business, Hours, Services, Team, Booking page, Deposits, Walk-ins, Account), Billing, Setup wizard
+- Mobile (<768px): sidebar becomes a slide-out menu from the top bar button
 - Sidebar logo links to https://bimblyai.com
 - Business name rendered from GET /api/business → data.business.name
 
@@ -107,7 +111,7 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - GET  /api/business — business details (no tokens/secrets)
 - PUT  /api/business — update name, phone, address, business_hours, ai_name, barbers
 - GET  /api/bookings — bookings with optional ?date=, ?from=&to=, ?limit= (default: last 30 days)
-- GET  /api/analytics — totalBookingsThisMonth/LastMonth, todayBookings (array), upcomingBookings (array), revenueEstimateThisMonth, busiestDays, popularServices, peakHours, bookingsByWeek
+- GET  /api/analytics — dates computed in the business timezone (luxon); revenue estimate priced from the business's services table. Returns totalBookingsThisMonth/LastMonth, todayBookings (array), upcomingBookings (array), revenueEstimateThisMonth, busiestDays, popularServices, peakHours, bookingsByWeek
 - GET  /api/services — all services for the business
 - POST /api/services — create service { name, price, duration_minutes, description }
 - PUT  /api/services/:id — update service (ownership verified)

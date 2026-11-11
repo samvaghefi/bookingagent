@@ -1,10 +1,11 @@
 'use strict';
 
-const { useState, useEffect, useCallback, useRef } = React;
+const { useState, useEffect, useCallback, useRef, useMemo, useContext, createContext } = React;
 
-const API_BASE = 'https://bookingagent-gmo2.onrender.com';
+// The dashboard is served by the same server as the API.
+const API_BASE = window.location.origin;
 
-// ── API helper ────────────────────────────────────────────────────────────────
+// ── API helpers ───────────────────────────────────────────────────────────────
 async function apiFetch(path, options = {}) {
   const token = localStorage.getItem('bimbly_token');
   const isFormData = options.body instanceof FormData;
@@ -18,122 +19,473 @@ async function apiFetch(path, options = {}) {
   });
   if (res.status === 401) {
     localStorage.removeItem('bimbly_token');
-    window.location.href = API_BASE + '/auth/dashboard/google';
-    throw new Error('Unauthorized');
+    window.location.href = API_BASE + '/auth/dashboard/login';
+    throw new Error('Your session expired. Please sign in again.');
   }
   return res;
 }
 
-// ── Spinner ───────────────────────────────────────────────────────────────────
-function Spinner() {
+// Like apiFetch, but parses JSON and throws a readable error when the request fails.
+async function api(path, options = {}) {
+  let res;
+  try {
+    res = await apiFetch(path, options);
+  } catch (err) {
+    throw new Error(err.message === 'Failed to fetch' ? 'Could not reach Bimbly. Check your connection and try again.' : err.message);
+  }
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
+  return data;
+}
+
+async function downloadFile(path, filename) {
+  const res = await apiFetch(path);
+  if (!res.ok) {
+    let msg = 'Download failed.';
+    try { msg = (await res.json()).error || msg; } catch {}
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ── Formatting ────────────────────────────────────────────────────────────────
+function localISODate(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function addDays(d, n) {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+function fmtDate(iso, opts = { month: 'short', day: 'numeric', year: 'numeric' }) {
+  if (!iso) return '';
+  const d = new Date(String(iso).slice(0, 10) + 'T00:00:00');
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleDateString('en-CA', opts);
+}
+
+function fmtDay(iso) {
+  if (!iso) return '';
+  const today = localISODate();
+  const tomorrow = localISODate(addDays(new Date(), 1));
+  if (iso === today) return 'Today';
+  if (iso === tomorrow) return 'Tomorrow';
+  return fmtDate(iso, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// "14:30", "14:30:00" -> "2:30 PM". Anything else is shown as-is.
+function fmtTime(t) {
+  if (!t) return '';
+  const m = String(t).match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!m) return String(t);
+  let h = parseInt(m[1], 10);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${m[2]} ${ampm}`;
+}
+
+function timeToMinutes(t) {
+  if (!t) return 9999;
+  const s = String(t).trim().toUpperCase();
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return 9999;
+  let h = parseInt(m[1], 10);
+  if (s.includes('PM') && h < 12) h += 12;
+  if (s.includes('AM') && h === 12) h = 0;
+  return h * 60 + parseInt(m[2], 10);
+}
+
+function fmtServices(v) {
+  if (Array.isArray(v)) return v.filter(Boolean).join(', ');
+  return v ? String(v) : '';
+}
+
+function fmtMoney(n, decimals = 0) {
+  const num = Number(n || 0);
+  return '$' + num.toLocaleString('en-CA', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
+function fmtPhone(p) {
+  if (!p) return '';
+  const digits = String(p).replace(/\D/g, '');
+  const d = digits.length === 11 && digits[0] === '1' ? digits.slice(1) : digits;
+  if (d.length !== 10) return String(p);
+  return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+}
+
+function initials(name) {
+  return String(name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
+}
+
+function capitalize(s) {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+}
+
+const PLAN_LABELS = { solo: 'Solo', starter: 'Starter', pro: 'Pro' };
+
+function teamWords(businessType) {
+  const t = (businessType || '').toLowerCase();
+  if (t.includes('barber')) return { one: 'barber', many: 'barbers', roles: ['Barber', 'Apprentice', 'Manager'] };
+  if (t.includes('hair'))   return { one: 'stylist', many: 'stylists', roles: ['Stylist', 'Colorist', 'Apprentice', 'Manager'] };
+  if (t.includes('nail'))   return { one: 'technician', many: 'technicians', roles: ['Technician', 'Apprentice', 'Manager'] };
+  return { one: 'team member', many: 'team members', roles: ['Team Member', 'Manager'] };
+}
+
+function teamLimit(plan) {
+  return plan === 'pro' ? Infinity : plan === 'starter' ? 4 : 1;
+}
+
+function normalizeTeam(list) {
+  return (list || []).map(m => typeof m === 'string' ? { name: m, role: '', calendarId: '' } : { role: '', calendarId: '', ...m });
+}
+
+// ── Icons ─────────────────────────────────────────────────────────────────────
+const ICONS = {
+  home:     'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
+  calendar: 'M7 3v3M17 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z',
+  users:    'M16 20v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 20v-1a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  queue:    'M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01',
+  settings: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  card:     'M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zM2 10h20M6 15h4',
+  sparkle:  'M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',
+  logout:   'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+  menu:     'M3 6h18M3 12h18M3 18h18',
+  check:    'M20 6 9 17l-5-5',
+  x:        'M18 6 6 18M6 6l12 12',
+  plus:     'M12 5v14M5 12h14',
+  trash:    'M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5',
+  copy:     'M9 9h11v11H9zM5 15H4V4h11v1',
+  external: 'M14 3h7v7M10 14 21 3M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5',
+  download: 'M12 3v12M7 10l5 5 5-5M5 21h14',
+  upload:   'M12 21V9M7 14l5-5 5 5M5 3h14',
+  search:   'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3',
+  phone:    'M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z',
+  dollar:   'M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6',
+  clock:    'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
+  alert:    'M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
+  info:     'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01',
+  back:     'M19 12H5M12 19l-7-7 7-7',
+  refresh:  'M21 12a9 9 0 1 1-2.6-6.4M21 3v6h-6',
+  trend:    'M3 17l6-6 4 4 8-8M14 7h7v7',
+  edit:     'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
+  bell:     'M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0',
+  arrow:    'M5 12h14M12 5l7 7-7 7',
+};
+
+function Icon({ name, className }) {
   return (
-    <div className="spinner-wrap">
-      <div className="spinner"></div>
-    </div>
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d={ICONS[name] || ''} />
+    </svg>
   );
 }
 
-// ── Sidebar ───────────────────────────────────────────────────────────────────
-function Sidebar({ page, setPage, business }) {
-  const navItems = [
-    { id: 'home',      label: 'Dashboard', icon: '◫' },
-    { id: 'bookings',  label: 'Bookings',  icon: '📅' },
-    { id: 'queue',     label: 'Walk-in Queue', icon: '🪑' },
-    { id: 'clients',   label: 'Clients',   icon: '👤' },
-    { id: 'settings',  label: 'Settings',  icon: '⚙' },
-    { id: 'billing',   label: 'Billing',   icon: '💳' },
-    { id: 'onboarding', label: 'Setup Wizard', icon: '✨' },
-  ];
+// ── Toasts ────────────────────────────────────────────────────────────────────
+const ToastContext = createContext(() => {});
+const useToast = () => useContext(ToastContext);
 
+function ToastProvider({ children }) {
+  const [toasts, setToasts] = useState([]);
+  const push = useCallback((text, type = 'success') => {
+    const id = Date.now() + Math.random();
+    setToasts(t => [...t, { id, text, type }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), type === 'error' ? 5000 : 3000);
+  }, []);
   return (
-    <aside className="sidebar">
-      <div className="sidebar-logo">
-        <a href="https://bimblyai.com" style={{display:'block'}}>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 90" width="180" height="48" style={{display:'block'}}>
-          <g transform="translate(8, 10)">
-            <path d="M22 38 Q22 14 42 14 Q62 14 62 38 Q62 62 82 62 Q102 62 102 38 Q102 14 82 14 Q62 14 62 38 Q62 62 42 62 Q22 62 22 38Z"
-                  fill="none" stroke="#7F77DD" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round"/>
-            <circle cx="42" cy="27" r="8" fill="#7F77DD"/>
-            <circle cx="43" cy="28" r="3.5" fill="white"/>
-            <circle cx="82" cy="27" r="8" fill="#7F77DD"/>
-            <circle cx="83" cy="28" r="3.5" fill="white"/>
-            <path d="M52 48 Q62 56 72 48" fill="none" stroke="#7F77DD" strokeWidth="2.5" strokeLinecap="round" opacity="0.5"/>
-            <line x1="62" y1="14" x2="62" y2="3" stroke="#F0997B" strokeWidth="3" strokeLinecap="round"/>
-            <circle cx="62" cy="3" r="6" fill="#F0997B"/>
-          </g>
-          <text x="130" y="58" fontFamily="'Helvetica Neue', Helvetica, Arial, sans-serif" fontSize="34" fontWeight="700" letterSpacing="-1">
-            <tspan fill="#AFA9EC">bimbly</tspan><tspan fill="#F0997B" fontWeight="300">ai</tspan>
-          </text>
-        </svg>
-        </a>
-      </div>
-      <nav className="sidebar-nav">
-        {navItems.map(item => (
-          <button
-            key={item.id}
-            className={`nav-item ${page === item.id ? 'active' : ''}`}
-            onClick={() => setPage(item.id)}
-          >
-            <span className="nav-icon">{item.icon}</span>
-            {item.label}
-          </button>
+    <ToastContext.Provider value={push}>
+      {children}
+      <div className="toasts" role="status" aria-live="polite">
+        {toasts.map(t => (
+          <div key={t.id} className={`toast toast--${t.type}`}>
+            <Icon name={t.type === 'error' ? 'alert' : 'check'} />
+            {t.text}
+          </div>
         ))}
-      </nav>
-      <div className="sidebar-footer">
-        <div className="business-name">{business?.name || 'Your Business'}</div>
-        <button
-          className="logout-btn"
-          onClick={() => {
-            localStorage.removeItem('bimbly_token');
-            window.location.href = API_BASE + '/auth/logout';
-          }}
-        >
-          Sign out
-        </button>
       </div>
-    </aside>
+    </ToastContext.Provider>
   );
 }
 
-// ── TopBar ────────────────────────────────────────────────────────────────────
-function TopBar({ title }) {
-  const today = new Date().toLocaleDateString('en-CA', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-  });
+// ── Primitives ────────────────────────────────────────────────────────────────
+function Spinner() {
+  return <div className="spinner-wrap"><div className="spinner" role="status" aria-label="Loading"></div></div>;
+}
+
+function Card({ title, description, action, children, footer, flush, className = '', badge }) {
   return (
-    <div className="topbar">
+    <section className={`card ${className}`}>
+      {(title || action) && (
+        <div className="card-head">
+          <div>
+            {title && <h2 className="card-title">{title}{badge}</h2>}
+            {description && <p className="card-desc">{description}</p>}
+          </div>
+          {action && <div className="row">{action}</div>}
+        </div>
+      )}
+      {children !== undefined && children !== null && children !== false && (
+        <div className={flush ? 'card-body card-body--flush' : 'card-body'}>{children}</div>
+      )}
+      {footer && <div className="card-foot">{footer}</div>}
+    </section>
+  );
+}
+
+function Field({ label, hint, error, optional, htmlFor, children, className = '' }) {
+  return (
+    <div className={`field ${className}`}>
+      {label && (
+        <label className="field-label" htmlFor={htmlFor}>
+          {label}{optional && <span className="optional"> (optional)</span>}
+        </label>
+      )}
+      {children}
+      {error ? <p className="field-error">{error}</p> : hint ? <p className="field-hint">{hint}</p> : null}
+    </div>
+  );
+}
+
+function Switch({ checked, onChange, disabled, label, id }) {
+  return (
+    <span className="switch">
+      <input type="checkbox" role="switch" id={id} aria-label={label} checked={!!checked} disabled={disabled}
+        onChange={e => onChange(e.target.checked)} />
+      <span className="switch-track" aria-hidden="true"></span>
+    </span>
+  );
+}
+
+function SwitchRow({ title, description, checked, onChange, disabled, id }) {
+  return (
+    <div className="switch-row">
+      <div className="switch-row-text">
+        <label className="switch-row-title" htmlFor={id}>{title}</label>
+        {description && <p className="field-hint">{description}</p>}
+      </div>
+      <Switch id={id} checked={checked} onChange={onChange} disabled={disabled} />
+    </div>
+  );
+}
+
+function Notice({ type = 'info', children }) {
+  const icon = type === 'error' || type === 'warn' ? 'alert' : type === 'success' ? 'check' : 'info';
+  return <div className={`notice notice--${type}`}><Icon name={icon} /><div>{children}</div></div>;
+}
+
+function EmptyState({ icon = 'calendar', title, sub, action }) {
+  return (
+    <div className="empty-state">
+      <div className="empty-icon"><Icon name={icon} /></div>
+      <div className="empty-title">{title}</div>
+      {sub && <p className="empty-sub">{sub}</p>}
+      {action}
+    </div>
+  );
+}
+
+function Modal({ title, children, actions, onClose }) {
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="modal-overlay" onMouseDown={onClose}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" onMouseDown={e => e.stopPropagation()}>
+        <div className="modal-body">
+          <h2 className="modal-title" id="modal-title">{title}</h2>
+          <div className="modal-text">{children}</div>
+        </div>
+        <div className="modal-actions">{actions}</div>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmDialog({ title, children, confirmLabel, cancelLabel = 'Cancel', danger = true, busy, onConfirm, onCancel }) {
+  return (
+    <Modal title={title} onClose={onCancel} actions={<>
+      <button className="btn btn--secondary" onClick={onCancel} disabled={busy}>{cancelLabel}</button>
+      <button className={`btn ${danger ? 'btn--danger' : 'btn--primary'}`} onClick={onConfirm} disabled={busy} autoFocus>
+        {busy ? 'Working…' : confirmLabel}
+      </button>
+    </>}>
+      {children}
+    </Modal>
+  );
+}
+
+function SaveStatus({ status }) {
+  if (!status) return null;
+  return (
+    <span className={`status status--${status.type}`} role="status">
+      {status.type === 'success' && <Icon name="check" />}
+      {status.text}
+    </span>
+  );
+}
+
+// Inline "Saved" / error message that clears itself.
+function useStatus() {
+  const [status, setStatus] = useState(null);
+  const timer = useRef(null);
+  const set = useCallback((type, text) => {
+    clearTimeout(timer.current);
+    setStatus(type ? { type, text } : null);
+    if (type === 'success') timer.current = setTimeout(() => setStatus(null), 3000);
+  }, []);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  return [status, set];
+}
+
+// Tracks whether a value has changed since it was last saved.
+function useDirty(value) {
+  const baseline = useRef(JSON.stringify(value));
+  const dirty = JSON.stringify(value) !== baseline.current;
+  const markSaved = useCallback(v => { baseline.current = JSON.stringify(v); }, []);
+  return [dirty, markSaved];
+}
+
+function SaveFooter({ saving, status, dirty, onSave, label = 'Save changes', disabled }) {
+  return (
+    <>
+      {status ? <SaveStatus status={status} /> : dirty ? <span className="status muted small" style={{ marginRight: 'auto', fontWeight: 400 }}>Unsaved changes</span> : null}
+      <button className="btn btn--primary" onClick={onSave} disabled={saving || disabled}>
+        {saving ? 'Saving…' : label}
+      </button>
+    </>
+  );
+}
+
+function StatusBadge({ status }) {
+  if (!status) return <span className="muted">-</span>;
+  const s = String(status).toLowerCase();
+  const tone = { confirmed: 'green', booked: 'green', completed: 'blue', pending: 'amber', cancelled: 'red', canceled: 'red', 'no-show': 'red', no_show: 'red' }[s] || '';
+  return <span className={`badge ${tone ? 'badge--' + tone : ''}`}>{capitalize(s.replace(/[_-]/g, ' '))}</span>;
+}
+
+function DepositBadge({ status }) {
+  if (!status || status === 'none') return null;
+  const map = {
+    pending: { tone: 'amber', label: 'Deposit pending' },
+    secured: { tone: 'green', label: 'Deposit secured' },
+    charged: { tone: 'red', label: 'Deposit charged' },
+    waived:  { tone: '', label: 'Deposit waived' },
+  };
+  const s = map[status];
+  if (!s) return null;
+  return <span className={`badge ${s.tone ? 'badge--' + s.tone : ''}`}>{s.label}</span>;
+}
+
+// ── Sidebar & top bar ─────────────────────────────────────────────────────────
+const NAV = [
+  { group: 'Your shop', items: [
+    { id: 'home',     label: 'Dashboard', icon: 'home' },
+    { id: 'bookings', label: 'Bookings',  icon: 'calendar' },
+    { id: 'queue',    label: 'Walk-ins',  icon: 'queue' },
+    { id: 'clients',  label: 'Clients',   icon: 'users' },
+  ]},
+  { group: 'Account', items: [
+    { id: 'settings',   label: 'Settings',     icon: 'settings' },
+    { id: 'billing',    label: 'Billing',      icon: 'card' },
+    { id: 'onboarding', label: 'Setup wizard', icon: 'sparkle' },
+  ]},
+];
+
+const PAGE_PARENT = { client: 'clients' };
+
+function Sidebar({ page, go, business, open, onClose, queueCount }) {
+  const active = PAGE_PARENT[page] || page;
+  const plan = PLAN_LABELS[business?.plan] || '';
+  return (
+    <>
+      {open && <div className="sidebar-scrim" onClick={onClose} aria-hidden="true"></div>}
+      <aside className={`sidebar ${open ? 'open' : ''}`} aria-label="Main">
+        <div className="sidebar-logo">
+          <a href="https://bimblyai.com" aria-label="Bimbly home">
+            <img src="/dashboard/brand/bimblyai-logo-primary.svg" alt="Bimblyai" width="133" height="32" />
+          </a>
+        </div>
+        <nav className="sidebar-nav">
+          {NAV.map(group => (
+            <React.Fragment key={group.group}>
+              <div className="nav-group-label">{group.group}</div>
+              {group.items.map(item => (
+                <button
+                  key={item.id}
+                  className={`nav-item ${active === item.id ? 'active' : ''}`}
+                  aria-current={active === item.id ? 'page' : undefined}
+                  onClick={() => go(item.id)}
+                >
+                  <Icon name={item.icon} />
+                  {item.label}
+                  {item.id === 'queue' && queueCount > 0 && <span className="nav-count" aria-label={`${queueCount} waiting`}>{queueCount}</span>}
+                </button>
+              ))}
+            </React.Fragment>
+          ))}
+        </nav>
+        <div className="sidebar-footer">
+          <div className="avatar" aria-hidden="true">{initials(business?.name)}</div>
+          <div className="sidebar-biz">
+            <div className="sidebar-biz-name">{business?.name || 'Your business'}</div>
+            {plan && <div className="sidebar-biz-plan">{plan} plan</div>}
+          </div>
+          <button
+            className="btn btn--ghost btn--icon btn--sm"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={() => {
+              localStorage.removeItem('bimbly_token');
+              window.location.href = API_BASE + '/auth/logout';
+            }}
+          >
+            <Icon name="logout" />
+          </button>
+        </div>
+      </aside>
+    </>
+  );
+}
+
+function TopBar({ title, onMenu }) {
+  const today = new Date().toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  return (
+    <header className="topbar">
+      <button className="btn btn--ghost btn--icon topbar-menu" onClick={onMenu} aria-label="Open menu">
+        <Icon name="menu" />
+      </button>
       <h1 className="topbar-title">{title}</h1>
-      <span className="topbar-date">Today is {today}</span>
-    </div>
+      <span className="topbar-date">{today}</span>
+    </header>
   );
 }
 
-// ── StatCard ──────────────────────────────────────────────────────────────────
-function StatCard({ label, value, accent, sub }) {
-  return (
-    <div className="stat-card" style={{ borderLeftColor: accent }}>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value" style={{ color: accent }}>{value}</div>
-      {sub && <div className="stat-sub">{sub}</div>}
-    </div>
-  );
-}
-
-// ── CSS Bar Chart ─────────────────────────────────────────────────────────────
-function BarChart({ data, color }) {
-  if (!data || !data.length) return <div className="empty-chart">No data yet</div>;
+// ── Charts ────────────────────────────────────────────────────────────────────
+function BarChart({ data, empty = 'No bookings yet' }) {
+  if (!data || !data.length || data.every(d => !d.count)) return <p className="empty-inline">{empty}</p>;
   const max = Math.max(...data.map(d => d.count), 1);
   return (
     <div className="bar-chart">
       {data.map((item, i) => (
         <div key={i} className="bar-row">
-          <div className="bar-label">{item.label || item.day || item.service || item.name}</div>
-          <div className="bar-track">
-            <div
-              className="bar-fill"
-              style={{ width: `${(item.count / max) * 100}%`, background: color }}
-            ></div>
-          </div>
+          <div className="bar-label" title={item.label}>{item.label}</div>
+          <div className="bar-track"><div className="bar-fill" style={{ width: `${(item.count / max) * 100}%` }}></div></div>
           <div className="bar-count">{item.count}</div>
         </div>
       ))}
@@ -141,2299 +493,413 @@ function BarChart({ data, color }) {
   );
 }
 
-// ── Bookings Table ────────────────────────────────────────────────────────────
-// ── DepositBadge ─────────────────────────────────────────────────────────────
-function DepositBadge({ status }) {
-  if (!status || status === 'none') return null;
-  const styles = {
-    pending:  { background: '#fef3c7', color: '#92400e', label: 'Deposit Pending' },
-    secured:  { background: '#d1fae5', color: '#065f46', label: 'Secured' },
-    charged:  { background: '#fee2e2', color: '#991b1b', label: 'Charged' },
-    waived:   { background: '#f3f4f6', color: '#6b7280', label: 'Waived' },
-  };
-  const s = styles[status];
-  if (!s) return null;
+function StatCard({ icon, label, value, sub }) {
   return (
-    <span className="status-badge" style={{ background: s.background, color: s.color, fontWeight: 600, fontSize: 12 }}>
-      {s.label}
-    </span>
+    <div className="card stat-card">
+      <div className="stat-label"><Icon name={icon} />{label}</div>
+      <div className="stat-value">{value}</div>
+      {sub && <div className="stat-sub">{sub}</div>}
+    </div>
   );
 }
 
-function BookingsTable({ bookings, clients = [], onClientClick, onDepositAction }) {
-  if (!bookings.length) {
-    return (
-      <div className="empty-state">
-        <div className="empty-icon">📞</div>
-        <div className="empty-title">No bookings yet</div>
-        <div className="empty-sub">Your AI receptionist is ready to take calls</div>
-      </div>
-    );
-  }
+// ── Bookings table (shared by Home, Bookings, Client profile) ────────────────
+function BookingsTable({ bookings, showCustomer = true, compact = false, onClientClick, onDepositAction, emptyTitle = 'No bookings yet', emptySub = 'Your AI receptionist is ready to take calls.' }) {
+  const [noShow, setNoShow] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!bookings.length) return <EmptyState icon="phone" title={emptyTitle} sub={emptySub} />;
+
+  const showDeposits = !compact && bookings.some(b => b.deposit_status && b.deposit_status !== 'none');
+
   return (
     <div className="table-wrap">
       <table className="data-table">
         <thead>
           <tr>
-            <th>Customer</th>
-            <th>Phone</th>
+            {showCustomer && <th>Customer</th>}
+            <th>Appointment</th>
             <th>Service</th>
-            <th>Date</th>
-            <th>Time</th>
-            <th>Team Member</th>
-            <th>Special Requests</th>
+            <th>Team member</th>
+            {!compact && <th>Notes</th>}
             <th>Status</th>
-            <th>Deposit</th>
+            {showDeposits && <th className="col-actions">Deposit</th>}
           </tr>
         </thead>
         <tbody>
           {bookings.map(b => (
             <tr key={b.id}>
-              <td>
-                <div
-                  className="cell-name"
-                  style={onClientClick && b.customer_phone ? { color: '#6366f1', textDecoration: 'underline', cursor: 'pointer' } : {}}
-                  onClick={() => {
-                    if (!onClientClick || !b.customer_phone) return;
-                    const match = clients.find(c => c.phone === b.customer_phone);
-                    onClientClick(match ? match.id : null, b.customer_phone);
-                  }}
-                >
-                  {String(b.customer_name || '—')}
-                </div>
-              </td>
-              <td>{String(b.customer_phone || '—')}</td>
-              <td>{Array.isArray(b.service_ids) ? b.service_ids.join(', ') : String(b.service_ids || '—')}</td>
-              <td>
-                {b.appointment_date
-                  ? new Date(b.appointment_date + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' })
-                  : '—'}
-              </td>
-              <td>{String(b.appointment_time || '—')}</td>
-              <td>{String(b.preferred_barber || '—')}</td>
-              <td className="cell-requests">{String(b.special_requests || '—')}</td>
-              <td>{String(b.status || '—')}</td>
-              <td>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <DepositBadge status={b.deposit_status} />
-                  {b.deposit_status === 'secured' && onDepositAction && (
-                    <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                      <button
-                        className="btn-outline"
-                        style={{ fontSize: 12, padding: '2px 8px', color: '#dc2626', borderColor: '#dc2626' }}
-                        onClick={() => {
-                          if (confirm(`Charge $${(b.deposit_amount_cents || 0) / 100 || 'deposit'} deposit for no-show?`)) {
-                            onDepositAction(b.id, 'no-show');
-                          }
-                        }}
-                      >
-                        No-Show
-                      </button>
-                      <button
-                        className="btn-outline"
-                        style={{ fontSize: 12, padding: '2px 8px' }}
-                        onClick={() => onDepositAction(b.id, 'waive')}
-                      >
-                        Waive
-                      </button>
-                    </div>
+              {showCustomer && (
+                <td>
+                  {onClientClick && b.customer_phone ? (
+                    <button className="link-name" onClick={() => onClientClick(b)}>{b.customer_name || 'Unknown caller'}</button>
+                  ) : (
+                    <div className="cell-name">{b.customer_name || 'Unknown caller'}</div>
                   )}
-                </div>
+                  {b.customer_phone && <div className="cell-sub num">{fmtPhone(b.customer_phone)}</div>}
+                </td>
+              )}
+              <td className="nowrap">
+                <div className="cell-name">{fmtDay(b.appointment_date) || '-'}</div>
+                <div className="cell-sub num">{fmtTime(b.appointment_time)}</div>
               </td>
+              <td>{fmtServices(b.service_ids) || <span className="muted">-</span>}</td>
+              <td>{b.preferred_barber || <span className="muted">Anyone</span>}</td>
+              {!compact && <td><div className="cell-clip" title={b.special_requests || ''}>{b.special_requests || <span className="muted">-</span>}</div></td>}
+              <td><StatusBadge status={b.status} /></td>
+              {showDeposits && (
+                <td className="col-actions">
+                  <div className="row" style={{ justifyContent: 'flex-end' }}>
+                    <DepositBadge status={b.deposit_status} />
+                    {b.deposit_status === 'secured' && onDepositAction && (
+                      <>
+                        <button className="btn btn--danger-outline btn--sm" onClick={() => setNoShow(b)}>No-show</button>
+                        <button className="btn btn--secondary btn--sm" onClick={() => onDepositAction(b.id, 'waive')}>Waive</button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
       </table>
+      {noShow && (
+        <ConfirmDialog
+          title="Charge the no-show deposit?"
+          confirmLabel={`Charge ${noShow.deposit_amount_cents ? fmtMoney(noShow.deposit_amount_cents / 100, 2) : 'deposit'}`}
+          busy={busy}
+          onCancel={() => setNoShow(null)}
+          onConfirm={async () => {
+            setBusy(true);
+            await onDepositAction(noShow.id, 'no-show');
+            setBusy(false);
+            setNoShow(null);
+          }}
+        >
+          {noShow.customer_name || 'This customer'} will be charged their deposit for missing the appointment on {fmtDate(noShow.appointment_date)}. This can't be undone.
+        </ConfirmDialog>
+      )}
     </div>
   );
 }
 
-// ── Dashboard Home ────────────────────────────────────────────────────────────
-function DashboardHome() {
+function useDepositAction(setBookings) {
+  const toast = useToast();
+  return useCallback(async (bookingId, action) => {
+    const endpoint = action === 'no-show' ? 'no-show' : 'waive-deposit';
+    try {
+      const data = await api(`/api/bookings/${bookingId}/${endpoint}`, { method: 'POST' });
+      setBookings(bs => bs.map(b => b.id === bookingId ? data.booking : b));
+      toast(action === 'no-show' ? 'Deposit charged' : 'Deposit waived');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }, [setBookings, toast]);
+}
+
+// ── Dashboard home ────────────────────────────────────────────────────────────
+const WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+function DashboardHome({ business, go, queue }) {
   const [analytics, setAnalytics] = useState(null);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [queue, setQueue] = useState([]);
 
   useEffect(() => {
-    Promise.all([
-      apiFetch('/api/analytics').then(r => r.json()),
-      apiFetch('/api/bookings?limit=10').then(r => r.json()),
-    ])
-      .then(([a, b]) => {
-        setAnalytics(a);
-        setBookings(b.bookings || []);
-      })
+    Promise.all([api('/api/analytics'), api('/api/bookings?limit=8')])
+      .then(([a, b]) => { setAnalytics(a); setBookings(b.bookings || []); })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
-  // Independent queue poll — runs regardless of analytics load state
-  useEffect(() => {
-    const fetchQueue = () => {
-      apiFetch('/api/queue')
-        .then(r => r.json())
-        .then(d => setQueue(d.queue || []))
-        .catch(() => {});
-    };
-    fetchQueue();
-    const interval = setInterval(fetchQueue, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
   if (loading) return <Spinner />;
-  if (error) return <div className="error-msg" style={{ margin: 24 }}>{error}</div>;
+  if (error) return <div className="page-content"><Notice type="error">{error}</Notice></div>;
 
   const a = analytics || {};
-  const busiestDays = (a.busiestDays || []).map(d => ({ ...d, label: d.day }));
-  const popularServices = (a.popularServices || []).map(s => ({ ...s, label: s.service }));
+  const today = (Array.isArray(a.todayBookings) ? a.todayBookings : [])
+    .slice().sort((x, y) => timeToMinutes(x.appointment_time) - timeToMinutes(y.appointment_time));
+  const upcoming = Array.isArray(a.upcomingBookings) ? a.upcomingBookings.length : 0;
+  const thisMonth = a.totalBookingsThisMonth ?? 0;
+  const lastMonth = a.totalBookingsLastMonth ?? 0;
+  const diff = thisMonth - lastMonth;
+
+  const dayCounts = Object.fromEntries((a.busiestDays || []).map(d => [d.day, d.count]));
+  const week = WEEK.map(d => ({ label: d, count: dayCounts[d] || 0 }));
+  const services = (a.popularServices || []).slice(0, 5).map(s => ({ label: s.service, count: s.count }));
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const ownerFirst = (business?.owner_name || '').split(' ')[0];
 
   return (
     <div className="page-content">
+      <div>
+        <h2 style={{ fontSize: 22, fontWeight: 800 }}>{greeting}{ownerFirst ? `, ${ownerFirst}` : ''}.</h2>
+        <p className="muted" style={{ marginTop: 4 }}>
+          {today.length === 0
+            ? 'Nothing booked for today yet. Bimbly is answering your calls.'
+            : `You have ${today.length} appointment${today.length === 1 ? '' : 's'} today.`}
+        </p>
+      </div>
+
       <div className="stats-row">
-        <StatCard label="Today's Bookings"   value={Array.isArray(a.todayBookings) ? a.todayBookings.length : (a.todayBookings ?? 0)}         accent="#D85A30" />
-        <StatCard label="This Month"          value={a.totalBookingsThisMonth ?? 0} accent="#534AB7" />
-        <StatCard label="Est. Revenue"        value={`$${(a.revenueEstimateThisMonth ?? 0).toLocaleString()}`} accent="#10b981" sub="this month" />
-        <StatCard label="Upcoming This Week"  value={Array.isArray(a.upcomingBookings) ? a.upcomingBookings.length : (a.upcomingBookings ?? 0)}       accent="#f59e0b" />
+        <StatCard icon="calendar" label="Today" value={today.length} sub={today.length === 1 ? 'appointment' : 'appointments'} />
+        <StatCard icon="clock" label="Next 7 days" value={upcoming} sub="upcoming bookings" />
+        <StatCard icon="trend" label="This month" value={thisMonth}
+          sub={lastMonth || thisMonth ? <><span className={diff >= 0 ? 'trend-up' : 'trend-down'}>{diff >= 0 ? '+' : ''}{diff}</span> vs last month</> : 'bookings'} />
+        <StatCard icon="dollar" label="Est. revenue" value={fmtMoney(a.revenueEstimateThisMonth)} sub="this month, from your prices" />
       </div>
 
-      <div className="charts-row">
-        <div className="card">
-          <div className="card-header">Bookings by Day of Week</div>
-          <BarChart data={busiestDays} color="#534AB7" />
-        </div>
-        <div className="card">
-          <div className="card-header">Popular Services</div>
-          <BarChart data={popularServices} color="#D85A30" />
-        </div>
-      </div>
+      <div className="grid-home">
+        <Card title="Today's book" description={new Date().toLocaleDateString('en-CA', { weekday: 'long', month: 'long', day: 'numeric' })}
+          action={<button className="btn btn--secondary btn--sm" onClick={() => go('bookings')}>All bookings</button>} flush>
+          {today.length === 0 ? (
+            <EmptyState icon="calendar" title="No appointments today" sub="New bookings show up here as soon as Bimbly takes the call." />
+          ) : (
+            <ul className="daybook">
+              {today.map(b => (
+                <li key={b.id} className="daybook-row">
+                  <span className="daybook-time">{fmtTime(b.appointment_time)}</span>
+                  <div className="daybook-body">
+                    <div className="daybook-name">{b.customer_name || 'Unknown caller'}</div>
+                    <div className="daybook-meta">{[fmtServices(b.service_ids), b.preferred_barber && `with ${b.preferred_barber}`].filter(Boolean).join(' · ')}</div>
+                  </div>
+                  <div className="daybook-aside"><StatusBadge status={b.status} /></div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
 
-      {queue.length > 0 && (
-        <div className="card">
-          <div className="card-header">
-            Walk-in Queue
-            <span className="status-badge" style={{ background: '#fef3c7', color: '#92400e', marginLeft: 10 }}>
-              {queue.length} waiting
-            </span>
-          </div>
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr><th>#</th><th>Name</th><th>Service</th><th>Waited</th><th>Status</th></tr>
-              </thead>
-              <tbody>
-                {queue.map(entry => {
-                  const waited = Math.floor((Date.now() - new Date(entry.created_at).getTime()) / 60000);
+        <div className="stack">
+          {queue.length > 0 && (
+            <Card title="Walk-ins waiting" badge={<span className="badge badge--amber">{queue.length}</span>}
+              action={<button className="btn btn--secondary btn--sm" onClick={() => go('queue')}>Manage</button>} flush>
+              <ul className="daybook">
+                {queue.slice(0, 4).map(entry => {
+                  const waited = Math.max(0, Math.floor((Date.now() - new Date(entry.created_at).getTime()) / 60000));
                   return (
-                    <tr key={entry.id}>
-                      <td style={{ fontWeight: 700, color: '#534AB7' }}>{entry.position}</td>
-                      <td>{entry.customer_name}</td>
-                      <td>{entry.service || '—'}</td>
-                      <td style={{ color: waited > 20 ? '#ef4444' : '#374151' }}>{waited}m</td>
-                      <td>
-                        <span className="status-badge" style={{
-                          background: entry.status === 'notified' ? '#d1fae5' : '#fef3c7',
-                          color: entry.status === 'notified' ? '#065f46' : '#92400e',
-                        }}>
-                          {entry.status === 'notified' ? 'Notified' : 'Waiting'}
-                        </span>
-                      </td>
-                    </tr>
+                    <li key={entry.id} className="daybook-row">
+                      <span className="daybook-time">#{entry.position}</span>
+                      <div className="daybook-body">
+                        <div className="daybook-name">{entry.customer_name}</div>
+                        <div className="daybook-meta">{entry.service || 'Walk-in'} · waiting {waited} min</div>
+                      </div>
+                      <div className="daybook-aside">
+                        <span className={`badge ${entry.status === 'notified' ? 'badge--green' : 'badge--amber'}`}>{entry.status === 'notified' ? 'Notified' : 'Waiting'}</span>
+                      </div>
+                    </li>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </ul>
+            </Card>
+          )}
+          <Card title="Busiest days" description="Last 8 weeks">
+            <BarChart data={week} />
+          </Card>
+          <Card title="Popular services" description="Last 8 weeks">
+            <BarChart data={services} />
+          </Card>
         </div>
-      )}
-
-      <div className="card">
-        <div className="card-header">Recent Bookings</div>
-        <BookingsTable bookings={bookings} />
       </div>
+
+      <Card title="Recent bookings" action={<button className="btn btn--secondary btn--sm" onClick={() => go('bookings')}>View all</button>} flush>
+        <BookingsTable bookings={bookings} compact />
+      </Card>
     </div>
   );
 }
 
-// ── Bookings Page ─────────────────────────────────────────────────────────────
-function BookingsPage({ clients = [], setPage }) {
+// ── Bookings page ─────────────────────────────────────────────────────────────
+const BOOKING_FILTERS = [
+  { id: 'upcoming', label: 'Upcoming' },
+  { id: 'today',    label: 'Today' },
+  { id: 'week',     label: 'Last 7 days' },
+  { id: 'month',    label: 'Last 30 days' },
+];
+
+function BookingsPage({ clients, go }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('month');
-
-  const handleDepositAction = async (bookingId, action) => {
-    const endpoint = action === 'no-show' ? 'no-show' : 'waive-deposit';
-    try {
-      const res = await apiFetch(`/api/bookings/${bookingId}/${endpoint}`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error || 'Action failed.'); return; }
-      setBookings(bs => bs.map(b => b.id === bookingId ? data.booking : b));
-    } catch { alert('Action failed. Please try again.'); }
-  };
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState('upcoming');
+  const [search, setSearch] = useState('');
+  const onDepositAction = useDepositAction(setBookings);
 
   useEffect(() => {
     setLoading(true);
-    let query = '/api/bookings';
-    const today = new Date().toISOString().slice(0, 10);
-    if (filter === 'today') {
-      query += `?date=${today}`;
-    } else if (filter === 'week') {
-      const from = new Date();
-      from.setDate(from.getDate() - 7);
-      query += `?from=${from.toISOString().slice(0, 10)}&to=${today}`;
-    }
-    apiFetch(query)
-      .then(r => r.json())
-      .then(d => setBookings(d.bookings || []))
-      .catch(() => {})
+    setError('');
+    const today = new Date();
+    const t = localISODate(today);
+    let query = '/api/bookings?limit=200';
+    if (filter === 'today') query += `&date=${t}`;
+    else if (filter === 'upcoming') query += `&from=${t}&to=${localISODate(addDays(today, 90))}`;
+    else if (filter === 'week') query += `&from=${localISODate(addDays(today, -7))}&to=${t}`;
+    else query += `&from=${localISODate(addDays(today, -30))}&to=${t}`;
+    api(query)
+      .then(d => {
+        let list = d.bookings || [];
+        if (filter === 'upcoming' || filter === 'today') {
+          list = list.slice().sort((a, b) =>
+            (a.appointment_date || '').localeCompare(b.appointment_date || '') || timeToMinutes(a.appointment_time) - timeToMinutes(b.appointment_time));
+        }
+        setBookings(list);
+      })
+      .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }, [filter]);
 
+  const q = search.trim().toLowerCase();
+  const shown = q
+    ? bookings.filter(b => [b.customer_name, b.customer_phone, fmtServices(b.service_ids), b.preferred_barber].some(v => String(v || '').toLowerCase().includes(q)))
+    : bookings;
+
+  const emptyCopy = {
+    upcoming: ['Nothing booked ahead yet', 'Upcoming appointments appear here as Bimbly books them.'],
+    today:    ['No appointments today', 'Bookings for today will show up here.'],
+    week:     ['No bookings in the last 7 days', 'Try a longer date range.'],
+    month:    ['No bookings in the last 30 days', 'Once customers call, their bookings show up here.'],
+  }[filter];
+
   return (
     <div className="page-content">
-      <div className="filter-bar">
-        {[
-          { id: 'today', label: 'Today' },
-          { id: 'week',  label: 'This Week' },
-          { id: 'month', label: 'This Month' },
-        ].map(f => (
-          <button
-            key={f.id}
-            className={`filter-btn ${filter === f.id ? 'active' : ''}`}
-            onClick={() => setFilter(f.id)}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-      <div className="card">
-        {loading ? <Spinner /> : (
-          <BookingsTable
-            bookings={bookings}
-            clients={clients}
-            onDepositAction={handleDepositAction}
-            onClientClick={(clientId, phone) => {
-              if (clientId) {
-                window._clientProfileId = clientId;
-                setPage('client-profile');
-              } else {
-                window._clientsSearch = phone;
-                setPage('clients');
-              }
-            }}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── WalkInQueueSettings ───────────────────────────────────────────────────────
-function WalkInQueueSettings({ business, setBusiness }) {
-  const [saving, setSaving]     = useState(false);
-  const [msg, setMsg]           = useState('');
-  const [qrUrl, setQrUrl]       = useState(null);
-  const qrBlobRef               = useRef(null);
-
-  // Load QR when queue_enabled is true
-  useEffect(() => {
-    if (!business?.queue_enabled) return;
-    apiFetch('/api/queue/qr')
-      .then(r => r.blob())
-      .then(blob => {
-        // Revoke previous blob URL to avoid memory leaks
-        if (qrBlobRef.current) URL.revokeObjectURL(qrBlobRef.current);
-        const url = URL.createObjectURL(blob);
-        qrBlobRef.current = url;
-        setQrUrl(url);
-      })
-      .catch(() => {});
-    return () => {
-      if (qrBlobRef.current) {
-        URL.revokeObjectURL(qrBlobRef.current);
-        qrBlobRef.current = null;
-      }
-    };
-  }, [business?.queue_enabled]);
-
-  const handleSave = async () => {
-    setSaving(true); setMsg('');
-    try {
-      await apiFetch('/api/business', {
-        method: 'PUT',
-        body: JSON.stringify({
-          queue_enabled:        business.queue_enabled,
-          queue_notify_timeout: parseInt(business.queue_notify_timeout || 10, 10),
-        }),
-      });
-      setMsg('Saved!');
-      setTimeout(() => setMsg(''), 2500);
-    } catch {
-      setMsg('Failed to save.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="card">
-      <div className="card-header">Walk-in Queue</div>
-      <div className="settings-grid">
-        <div className="form-group full-width">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-            <input
-              type="checkbox"
-              id="queueToggle"
-              checked={!!business?.queue_enabled}
-              onChange={e => setBusiness(b => ({ ...b, queue_enabled: e.target.checked }))}
-              style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#534AB7' }}
-            />
-            <label htmlFor="queueToggle" style={{ margin: 0, fontWeight: 400, fontSize: 14, color: '#374151', cursor: 'pointer' }}>
-              Enable walk-in queue (QR code check-in)
-            </label>
-          </div>
+      <div className="toolbar">
+        <div className="segmented" role="tablist" aria-label="Date range">
+          {BOOKING_FILTERS.map(f => (
+            <button key={f.id} role="tab" aria-selected={filter === f.id} className={`segment ${filter === f.id ? 'active' : ''}`} onClick={() => setFilter(f.id)}>
+              {f.label}
+            </button>
+          ))}
         </div>
+        <div className="search">
+          <Icon name="search" />
+          <input className="input" type="search" placeholder="Search name, phone or service" aria-label="Search bookings" value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+      </div>
 
-        {business?.queue_enabled && (
+      {error && <Notice type="error">{error}</Notice>}
+
+      <section className="card">
+        {loading ? <Spinner /> : (
           <>
-            <div className="form-group">
-              <label>No-show timeout (minutes)</label>
-              <input
-                type="number"
-                min="1"
-                max="60"
-                step="1"
-                value={business?.queue_notify_timeout ?? 10}
-                onChange={e => setBusiness(b => ({ ...b, queue_notify_timeout: parseInt(e.target.value) || 10 }))}
-                style={{ width: 120 }}
-              />
-              <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>
-                Customers are auto-marked no-show this many minutes after being notified.
-              </p>
-            </div>
-
-            <div className="form-group full-width">
-              <label>Walk-in QR Code</label>
-              {qrUrl ? (
-                <div style={{ marginTop: 8 }}>
-                  <img src={qrUrl} alt="Walk-in queue QR code" style={{ width: 180, height: 180, display: 'block', marginBottom: 10 }} />
-                  <a
-                    href={qrUrl}
-                    download="walkin-qr.png"
-                    className="btn-outline"
-                    style={{ fontSize: 13, display: 'inline-block', textDecoration: 'none' }}
-                  >
-                    Download QR
-                  </a>
-                </div>
-              ) : (
-                <div style={{ color: '#9ca3af', fontSize: 13, marginTop: 6 }}>Loading QR code...</div>
-              )}
-            </div>
+            <BookingsTable
+              bookings={shown}
+              onDepositAction={onDepositAction}
+              emptyTitle={q ? 'No matches' : emptyCopy[0]}
+              emptySub={q ? 'Try a different name, phone number or service.' : emptyCopy[1]}
+              onClientClick={b => {
+                const match = clients.find(c => c.phone === b.customer_phone);
+                if (match) go('client', match.id);
+                else go('clients', b.customer_phone);
+              }}
+            />
+            {shown.length > 0 && <div className="table-foot">{shown.length} booking{shown.length === 1 ? '' : 's'}</div>}
           </>
         )}
-      </div>
-      <div className="save-row">
-        <button className="btn-primary" onClick={handleSave} disabled={saving}>
-          {saving ? 'Saving...' : 'Save Queue Settings'}
-        </button>
-        {msg && (
-          <span className={`save-msg ${msg === 'Saved!' ? 'success' : 'error'}`}>{msg}</span>
-        )}
-      </div>
+      </section>
     </div>
   );
 }
 
-// ── Settings Page ─────────────────────────────────────────────────────────────
-const DAYS = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-
-function SettingsPage({ setPage }) {
-  const [business, setBusiness]   = useState(null);
-  const [services, setServices]   = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [saving, setSaving]       = useState(false);
-  const [saveMsg, setSaveMsg]     = useState('');
-  const [newService, setNewService] = useState(null);
-  const [barbers, setBarbers]     = useState([]);
-  const [newBarber, setNewBarber]   = useState('');
-  const [recordSaving, setRecordSaving] = useState(false);
-  const [recordMsg, setRecordMsg]       = useState('');
-  const [depositSaving, setDepositSaving] = useState(false);
-  const [depositMsg, setDepositMsg]       = useState('');
-  const [logoUploading, setLogoUploading] = useState(false);
-  const [logoMsg, setLogoMsg]             = useState('');
-  const recordDebounceRef = useRef(null);
-
-  useEffect(() => {
-    Promise.all([
-      apiFetch('/api/business').then(r => r.json()),
-      apiFetch('/api/services').then(r => r.json()),
-    ])
-      .then(([b, s]) => {
-        const biz = b.business || b;
-        setBusiness({ ...biz, deposit_amount_display: biz.deposit_amount != null ? biz.deposit_amount / 100 : 25 });
-        setServices(s.services || s || []);
-        setBarbers((biz.team_members || biz.barbers || []).map(b => typeof b === 'string' ? { name: b, role: '', calendarId: '' } : { role: '', calendarId: '', ...b }));
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    setSaveMsg('');
-    try {
-      const normalizedHours = {};
-      DAYS.forEach(day => {
-        normalizedHours[day] = business.business_hours?.[day] || { open: '09:00', close: '18:00', closed: false };
-      });
-      await apiFetch('/api/business', {
-        method: 'PUT',
-        body: JSON.stringify({
-          name:           business.name,
-          phone:          business.phone,
-          address:        business.address,
-          business_hours: normalizedHours,
-          ai_name:        business.ai_name,
-          team_members:   barbers,
-        }),
-      });
-      setSaveMsg('Saved!');
-      setTimeout(() => setSaveMsg(''), 2500);
-    } catch {
-      setSaveMsg('Failed to save.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleRecordingToggle = (enabled) => {
-    setBusiness(b => ({ ...b, call_recording_enabled: enabled }));
-    clearTimeout(recordDebounceRef.current);
-    recordDebounceRef.current = setTimeout(async () => {
-      setRecordSaving(true);
-      setRecordMsg('');
-      try {
-        await apiFetch('/api/business/recording', {
-          method: 'PUT',
-          body: JSON.stringify({ enabled }),
-        });
-        setRecordMsg('Recording setting updated');
-        setTimeout(() => setRecordMsg(''), 2500);
-      } catch {
-        setRecordMsg('Failed to update recording setting.');
-        setBusiness(b => ({ ...b, call_recording_enabled: !enabled }));
-      } finally {
-        setRecordSaving(false);
-      }
-    }, 500);
-  };
-
-  const handleDepositSave = async () => {
-    setDepositSaving(true);
-    setDepositMsg('');
-    try {
-      await apiFetch('/api/business', {
-        method: 'PUT',
-        body: JSON.stringify({
-          deposit_enabled: business.deposit_enabled,
-          deposit_amount:  Math.round((business.deposit_amount_display || 0) * 100),
-        }),
-      });
-      setBusiness(b => ({ ...b, deposit_amount: Math.round((b.deposit_amount_display || 0) * 100) }));
-      setDepositMsg('Saved!');
-      setTimeout(() => setDepositMsg(''), 2500);
-    } catch {
-      setDepositMsg('Failed to save.');
-    } finally {
-      setDepositSaving(false);
-    }
-  };
-
-  const handleLogoUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setLogoUploading(true);
-    setLogoMsg('');
-    try {
-      const form = new FormData();
-      form.append('logo', file);
-      const res = await apiFetch('/api/business/logo', { method: 'POST', body: form });
-      const data = await res.json();
-      if (!res.ok) { setLogoMsg(data.error || 'Upload failed.'); return; }
-      setBusiness(b => ({ ...b, logo_url: data.logo_url }));
-      setLogoMsg('Logo uploaded!');
-      setTimeout(() => setLogoMsg(''), 2500);
-    } catch {
-      setLogoMsg('Upload failed.');
-    } finally {
-      setLogoUploading(false);
-      e.target.value = '';
-    }
-  };
-
-  const handleLogoDelete = async () => {
-    setLogoUploading(true);
-    setLogoMsg('');
-    try {
-      await apiFetch('/api/business/logo', { method: 'DELETE' });
-      setBusiness(b => ({ ...b, logo_url: null }));
-      setLogoMsg('Logo removed.');
-      setTimeout(() => setLogoMsg(''), 2500);
-    } catch {
-      setLogoMsg('Failed to remove logo.');
-    } finally {
-      setLogoUploading(false);
-    }
-  };
-
-  const addService = async () => {
-    if (!newService?.name) return;
-    try {
-      const res = await apiFetch('/api/services', {
-        method: 'POST',
-        body: JSON.stringify(newService),
-      });
-      const data = await res.json();
-      setServices(s => [...s, data.service || data]);
-      setNewService(null);
-    } catch {}
-  };
-
-  const deleteService = async id => {
-    try {
-      await apiFetch(`/api/services/${id}`, { method: 'DELETE' });
-      setServices(s => s.filter(x => x.id !== id));
-    } catch {}
-  };
-
-  const updateHours = (day, field, value) => {
-    setBusiness(b => ({
-      ...b,
-      business_hours: {
-        ...(b.business_hours || {}),
-        [day]: {
-          ...(b.business_hours?.[day] || { open: '09:00', close: '18:00', closed: false }),
-          [field]: value,
-        },
-      },
-    }));
-  };
-
-  if (loading) return <Spinner />;
-  const hours = business?.business_hours || {};
-
-  return (
-    <div className="page-content settings-page">
-
-      {/* ── Your Booking Page ── */}
-      <div className="card">
-        <div className="card-header">Your Booking Page</div>
-        {business.booking_slug ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 14px', marginBottom: 14 }}>
-            <span style={{ flex: 1, fontSize: 14, color: '#374151', wordBreak: 'break-all' }}>
-              {window.location.origin}/book/{business.booking_slug}
-            </span>
-            <button
-              onClick={() => navigator.clipboard.writeText(`${window.location.origin}/book/${business.booking_slug}`)}
-              style={{ padding: '6px 12px', background: '#534AB7', color: '#fff', border: 'none', borderRadius: 6, fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}
-            >Copy link</button>
-            <a href={`/book/${business.booking_slug}`} target="_blank" rel="noopener noreferrer"
-              style={{ padding: '6px 12px', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: 6, fontSize: 13, textDecoration: 'none', whiteSpace: 'nowrap' }}>
-              Open ↗
-            </a>
-          </div>
-        ) : (
-          <p style={{ fontSize: 14, color: '#6b7280', marginBottom: 14 }}>
-            Set a slug below to activate your public booking page.
-          </p>
-        )}
-        <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Booking page slug</label>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input
-            type="text"
-            id="slugInput"
-            defaultValue={business.booking_slug || ''}
-            placeholder="e.g. sams-barbershop"
-            style={{ flex: 1, padding: '10px 12px', border: '1.5px solid #e5e7eb', borderRadius: 10, fontSize: 15 }}
-          />
-          <button
-            onClick={async () => {
-              const slug = document.getElementById('slugInput').value.trim().toLowerCase();
-              const res = await fetch('/api/business/slug', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('bimbly_token')}` },
-                body: JSON.stringify({ slug }),
-              });
-              const data = await res.json();
-              if (!res.ok) { alert(data.error || 'Failed to save.'); }
-              else { setBusiness(b => ({ ...b, booking_slug: data.business.booking_slug })); }
-            }}
-            style={{ padding: '10px 16px', background: '#534AB7', color: '#fff', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
-          >Save</button>
-        </div>
-        <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Lowercase letters, numbers, and hyphens only.</p>
-      </div>
-
-      {/* ── Business Info ── */}
-      <div className="card">
-        <div className="card-header">Business Info</div>
-        <div className="settings-grid">
-          <div className="form-group">
-            <label>Business Name</label>
-            <input
-              value={business?.name || ''}
-              onChange={e => setBusiness(b => ({ ...b, name: e.target.value }))}
-            />
-          </div>
-          <div className="form-group">
-            <label>Phone Number</label>
-            <input
-              value={business?.phone || ''}
-              onChange={e => setBusiness(b => ({ ...b, phone: e.target.value }))}
-            />
-          </div>
-          <div className="form-group full-width">
-            <label>Address</label>
-            <input
-              value={business?.address || ''}
-              onChange={e => setBusiness(b => ({ ...b, address: e.target.value }))}
-            />
-          </div>
-          <div className="form-group">
-            <label>AI Receptionist Name</label>
-            <input
-              value={business?.ai_name || ''}
-              onChange={e => setBusiness(b => ({ ...b, ai_name: e.target.value }))}
-              placeholder="e.g. Alex"
-            />
-          </div>
-        </div>
-
-        <div className="card-subheader">Business Hours</div>
-        <div className="hours-grid">
-          {DAYS.map(day => {
-            const h = hours[day] || { open: '09:00', close: '18:00', closed: false };
-            return (
-              <div key={day} className="hours-row">
-                <span className="day-label">
-                  {day.charAt(0).toUpperCase() + day.slice(1)}
-                </span>
-                <label className="toggle-label">
-                  <input
-                    type="checkbox"
-                    checked={!h.closed}
-                    onChange={e => updateHours(day, 'closed', !e.target.checked)}
-                  />
-                  <span className="toggle-text">{h.closed ? 'Closed' : 'Open'}</span>
-                </label>
-                {!h.closed && (
-                  <>
-                    <input
-                      type="time"
-                      value={h.open}
-                      className="time-input"
-                      onChange={e => updateHours(day, 'open', e.target.value)}
-                    />
-                    <span className="time-sep">to</span>
-                    <input
-                      type="time"
-                      value={h.close}
-                      className="time-input"
-                      onChange={e => updateHours(day, 'close', e.target.value)}
-                    />
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="save-row">
-          {saveMsg && (
-            <span className={`save-msg ${saveMsg === 'Saved!' ? 'success' : 'error'}`}>
-              {saveMsg}
-            </span>
-          )}
-          <button className="btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Changes'}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Services ── */}
-      <div className="card">
-        <div className="card-header">Services</div>
-        <div className="services-list">
-          {services.length === 0 && (
-            <div style={{ color: '#9ca3af', fontSize: 13, padding: '8px 0' }}>
-              No services yet — add your first one below.
-            </div>
-          )}
-          {services.map(s => (
-            <div key={s.id} className="service-row">
-              <div className="service-info">
-                <span className="service-name">{s.name}</span>
-                <span className="service-meta">
-                  {s.duration_minutes ? `${s.duration_minutes} min` : ''}
-                  {s.duration_minutes && s.price ? ' · ' : ''}
-                  {s.price ? `$${parseFloat(s.price).toFixed(0)}` : ''}
-                </span>
-              </div>
-              <button className="btn-icon-danger" onClick={() => deleteService(s.id)}>
-                Remove
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {newService === null ? (
-          <div style={{ padding: '12px 24px' }}>
-            <button
-              className="btn-outline"
-              onClick={() => setNewService({ name: '', price: '', duration_minutes: '' })}
-            >
-              + Add Service
-            </button>
-          </div>
-        ) : (
-          <div className="add-service-form">
-            <input
-              placeholder="Service name"
-              value={newService.name}
-              onChange={e => setNewService(s => ({ ...s, name: e.target.value }))}
-              style={{ flex: 2 }}
-            />
-            <input
-              placeholder="Price ($)"
-              type="number"
-              value={newService.price}
-              onChange={e => setNewService(s => ({ ...s, price: e.target.value }))}
-              style={{ flex: 1, minWidth: 90 }}
-            />
-            <input
-              placeholder="Duration (min)"
-              type="number"
-              value={newService.duration_minutes}
-              onChange={e => setNewService(s => ({ ...s, duration_minutes: e.target.value }))}
-              style={{ flex: 1, minWidth: 110 }}
-            />
-            <button className="btn-primary" onClick={addService}>Add</button>
-            <button className="btn-ghost" onClick={() => setNewService(null)}>Cancel</button>
-          </div>
-        )}
-      </div>
-
-      {/* ── Team Members ── */}
-      {(() => {
-        const bizType = (business?.business_type || '').toLowerCase();
-        const memberWord = bizType.includes('barber') ? 'barbers'
-          : bizType.includes('hair') ? 'stylists'
-          : bizType.includes('nail') ? 'technicians'
-          : 'team members';
-        const roleOptions = bizType.includes('barber')
-          ? ['Barber', 'Apprentice', 'Manager']
-          : bizType.includes('hair')
-          ? ['Stylist', 'Colorist', 'Apprentice', 'Manager']
-          : bizType.includes('nail')
-          ? ['Technician', 'Apprentice', 'Manager']
-          : ['Team Member', 'Manager'];
-        const plan = business?.plan || 'solo';
-        const maxMembers = plan === 'pro' ? Infinity : plan === 'starter' ? 4 : 1;
-        const atLimit = barbers.length >= maxMembers;
-        const upgradeMsg = plan === 'solo'
-          ? 'Upgrade to Starter to add more team members'
-          : plan === 'starter'
-          ? 'Upgrade to Pro to add more team members'
-          : null;
-        return (
-          <div className="card">
-            <div className="card-header">Team Members</div>
-            <p className="card-note">
-              These names are used by your AI receptionist when customers request a specific {memberWord.slice(0, -1)}.
-            </p>
-            <div className="barbers-list">
-              {barbers.map((barber, i) => (
-                <div key={i} style={{ marginBottom: 12 }}>
-                  <div className="barber-chip" style={{ marginBottom: 4 }}>
-                    {barber.name}{i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
-                    {barber.role && <span style={{ fontSize: 11, background: '#ede9fe', color: '#6d28d9', borderRadius: 4, padding: '1px 6px', marginLeft: 6 }}>{barber.role}</span>}
-                    {i !== 0 && (
-                      <button
-                        className="chip-remove"
-                        onClick={() => setBarbers(b => b.filter((_, j) => j !== i))}
-                      >×</button>
-                    )}
-                  </div>
-                  <select
-                    value={barber.role || ''}
-                    onChange={e => setBarbers(b => b.map((x, j) => j === i ? { ...x, role: e.target.value } : x))}
-                    style={{ fontSize: 12, padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6, width: '100%', color: '#374151', marginBottom: 4 }}
-                  >
-                    <option value="">Role (optional)</option>
-                    {roleOptions.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="Google Calendar ID (optional, e.g. name@gmail.com)"
-                    value={barber.calendarId || ''}
-                    onChange={e => setBarbers(b => b.map((x, j) => j === i ? { ...x, calendarId: e.target.value } : x))}
-                    style={{ fontSize: 12, padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6, width: '100%', color: '#6b7280' }}
-                  />
-                </div>
-              ))}
-              {barbers.length === 0 && (
-                <span style={{ color: '#9ca3af', fontSize: 13 }}>No {memberWord} added yet.</span>
-              )}
-            </div>
-            {atLimit ? (
-              upgradeMsg && <p className="card-note" style={{ marginTop: 10, color: '#9ca3af' }}>
-                {upgradeMsg}. <a href="#" onClick={e => { e.preventDefault(); setPage('billing'); }} style={{ color: '#534ab7' }}>Upgrade your plan →</a>
-              </p>
-            ) : (
-              <div className="add-barber-row">
-                <input
-                  placeholder="Team member name"
-                  value={newBarber}
-                  onChange={e => setNewBarber(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && newBarber.trim()) {
-                      setBarbers(b => [...b, { name: newBarber.trim(), role: '', calendarId: '' }]);
-                      setNewBarber('');
-                    }
-                  }}
-                />
-                <button
-                  className="btn-outline"
-                  onClick={() => {
-                    if (newBarber.trim()) {
-                      setBarbers(b => [...b, { name: newBarber.trim(), role: '', calendarId: '' }]);
-                      setNewBarber('');
-                    }
-                  }}
-                >
-                  Add
-                </button>
-              </div>
-            )}
-            <div className="save-row">
-              <button className="btn-primary" onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Team Members'}
-              </button>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── Logo ── */}
-      {(() => {
-        const plan = business?.plan || 'solo';
-        return (
-          <div className="card">
-            <div className="card-header">Booking Page Logo</div>
-            {plan === 'solo' ? (
-              <p style={{ color: '#6B7280', fontSize: 14, margin: '12px 0' }}>
-                Logo upload is available on the Starter plan and above.{' '}
-                <a href="#" onClick={e => { e.preventDefault(); setPage('billing'); }} style={{ color: '#534AB7' }}>
-                  Upgrade to Starter
-                </a>
-              </p>
-            ) : (
-              <div className="settings-grid">
-                <div className="form-group full-width">
-                  {business?.logo_url && (
-                    <div style={{ marginBottom: 12 }}>
-                      <img src={business.logo_url} alt="Business logo" style={{ maxHeight: 80, maxWidth: 240, borderRadius: 6, border: '1px solid #e5e7eb', objectFit: 'contain' }} />
-                    </div>
-                  )}
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg"
-                    onChange={handleLogoUpload}
-                    disabled={logoUploading}
-                    style={{ fontSize: 14 }}
-                  />
-                  <p style={{ color: '#6B7280', fontSize: 12, marginTop: 6 }}>PNG or JPG, max 2MB. Displayed at the top of your public booking page.</p>
-                  {business?.logo_url && (
-                    <button
-                      className="btn-danger"
-                      style={{ marginTop: 8 }}
-                      onClick={handleLogoDelete}
-                      disabled={logoUploading}
-                    >
-                      Remove Logo
-                    </button>
-                  )}
-                  {logoMsg && (
-                    <span className={`save-msg ${logoMsg.includes('!') ? 'success' : logoMsg.includes('removed') ? 'success' : 'error'}`} style={{ marginLeft: 8 }}>{logoMsg}</span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* ── Export Data ── */}
-      {(() => {
-        const plan = business?.plan || 'solo';
-        return (
-          <div className="card">
-            <div className="card-header">Export Data</div>
-            {plan === 'solo' ? (
-              <div style={{ color: '#6B7280', fontSize: 14 }}>
-                <p style={{ margin: '0 0 12px' }}>Export your bookings and client data as CSV. Available on Starter and Pro plans.</p>
-                <a href="#" onClick={e => { e.preventDefault(); setPage('billing'); }} className="btn-primary" style={{ display: 'inline-block', opacity: 0.7 }}>
-                  Upgrade to Starter
-                </a>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 4 }}>
-                <a
-                  href={`${typeof API_BASE !== 'undefined' ? API_BASE : ''}/api/export/bookings`}
-                  onClick={e => {
-                    e.preventDefault();
-                    const token = localStorage.getItem('bimbly_token');
-                    fetch((typeof API_BASE !== 'undefined' ? API_BASE : '') + '/api/export/bookings', {
-                      headers: { Authorization: `Bearer ${token}` },
-                    }).then(r => r.blob()).then(blob => {
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = 'bookings.csv';
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    });
-                  }}
-                  className="btn-primary"
-                  style={{ display: 'inline-block' }}
-                >
-                  Export Bookings (CSV)
-                </a>
-                <a
-                  href="#"
-                  onClick={e => {
-                    e.preventDefault();
-                    const token = localStorage.getItem('bimbly_token');
-                    fetch((typeof API_BASE !== 'undefined' ? API_BASE : '') + '/api/export/clients', {
-                      headers: { Authorization: `Bearer ${token}` },
-                    }).then(r => r.blob()).then(blob => {
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      a.download = 'clients.csv';
-                      a.click();
-                      URL.revokeObjectURL(url);
-                    });
-                  }}
-                  className="btn-primary"
-                  style={{ display: 'inline-block' }}
-                >
-                  Export Clients (CSV)
-                </a>
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* ── No-Show Deposits ── */}
-      <div className="card">
-        <div className="card-header">No-Show Deposits</div>
-        <div className="settings-grid">
-          <div className="form-group full-width">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-              <input
-                type="checkbox"
-                id="depositToggle"
-                checked={!!business?.deposit_enabled}
-                onChange={e => setBusiness(b => ({ ...b, deposit_enabled: e.target.checked }))}
-                style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#534AB7' }}
-              />
-              <label htmlFor="depositToggle" style={{ margin: 0, fontWeight: 400, fontSize: 14, color: '#374151', cursor: 'pointer' }}>
-                Require a deposit to secure bookings
-              </label>
-            </div>
-          </div>
-          {business?.deposit_enabled && (
-            <div className="form-group">
-              <label>Deposit Amount (CA$)</label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={business?.deposit_amount_display ?? 25}
-                onChange={e => setBusiness(b => ({ ...b, deposit_amount_display: parseFloat(e.target.value) || 0 }))}
-                style={{ width: 120 }}
-              />
-            </div>
-          )}
-        </div>
-        <div className="save-row">
-          <button className="btn-primary" onClick={handleDepositSave} disabled={depositSaving}>
-            {depositSaving ? 'Saving...' : 'Save Deposit Settings'}
-          </button>
-          {depositMsg && (
-            <span className={`save-msg ${depositMsg === 'Saved!' ? 'success' : 'error'}`}>{depositMsg}</span>
-          )}
-        </div>
-      </div>
-
-      {/* ── Walk-in Queue ── */}
-      <WalkInQueueSettings business={business} setBusiness={setBusiness} />
-
-      {/* ── AI Agent Settings ── */}
-      <div className="card">
-        <div className="card-header">AI Agent Settings</div>
-
-        <div className="settings-grid">
-          <div className="form-group full-width">
-            <label>Call Recording</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 4 }}>
-              <input
-                type="checkbox"
-                id="recordingToggle"
-                checked={!!business?.call_recording_enabled}
-                disabled={recordSaving}
-                onChange={e => handleRecordingToggle(e.target.checked)}
-                style={{ width: 16, height: 16, cursor: 'pointer', accentColor: '#534AB7' }}
-              />
-              <label htmlFor="recordingToggle" style={{ margin: 0, fontWeight: 400, fontSize: 14, color: '#374151', cursor: 'pointer' }}>
-                Record calls for quality purposes
-              </label>
-            </div>
-            {recordMsg && (
-              <span className={`save-msg ${recordMsg.includes('updated') ? 'success' : 'error'}`} style={{ display: 'block', marginTop: 6 }}>
-                {recordMsg}
-              </span>
-            )}
-          </div>
-
-          <div className="form-group full-width">
-            <label>Supported Languages</label>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-              {(business?.supported_languages || ['en']).map(code => {
-                const names = { en: 'English', fa: 'Farsi', ko: 'Korean' };
-                return (
-                  <span key={code} className="status-badge" style={{ background: '#ede9fe', color: '#534AB7', fontWeight: 600, fontSize: 13 }}>
-                    {names[code] || code}
-                  </span>
-                );
-              })}
-            </div>
-            <p className="card-note" style={{ marginTop: 8 }}>Configured by Bimbly. Contact support to change supported languages.</p>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Change Password ── */}
-      <ChangePasswordCard />
-
-    </div>
-  );
-}
-
-// ── Change Password Card ───────────────────────────────────────────────────────
-function ChangePasswordCard() {
-  const [currentPassword, setCurrentPassword] = React.useState('');
-  const [newPassword,     setNewPassword]     = React.useState('');
-  const [confirmPassword, setConfirmPassword] = React.useState('');
-  const [saving,          setSaving]          = React.useState(false);
-  const [msg,             setMsg]             = React.useState(null); // { type: 'success'|'error', text }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setMsg(null);
-
-    if (newPassword !== confirmPassword) {
-      setMsg({ type: 'error', text: 'New password and confirmation do not match.' });
-      return;
-    }
-    const missing = [
-      newPassword.length < 8          && 'at least 8 characters',
-      !/[A-Z]/.test(newPassword)       && 'a capital letter',
-      !/[0-9]/.test(newPassword)       && 'a number',
-      !/[^A-Za-z0-9\s]/.test(newPassword) && 'a special character',
-    ].filter(Boolean);
-    if (missing.length) {
-      setMsg({ type: 'error', text: 'New password needs ' + missing.join(', ') + '.' });
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const res  = await apiFetch('/api/auth/change-password', {
-        method: 'POST',
-        body:   JSON.stringify({ currentPassword, newPassword, confirmPassword }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMsg({ type: 'success', text: 'Password updated successfully.' });
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-      } else {
-        setMsg({ type: 'error', text: data.error || 'Failed to update password.' });
-      }
-    } catch {
-      setMsg({ type: 'error', text: 'Network error. Please try again.' });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="card">
-      <div className="card-header">Change Password</div>
-      <form onSubmit={handleSubmit} style={{ maxWidth: 400 }}>
-        <div className="form-group">
-          <label>Current password</label>
-          <input
-            type="password"
-            value={currentPassword}
-            onChange={e => setCurrentPassword(e.target.value)}
-            placeholder="Your current password"
-            required
-            autoComplete="current-password"
-          />
-        </div>
-        <div className="form-group">
-          <label>New password</label>
-          <input
-            type="password"
-            value={newPassword}
-            onChange={e => setNewPassword(e.target.value)}
-            placeholder="At least 8 characters"
-            required
-            minLength={8}
-            autoComplete="new-password"
-          />
-          <p style={{ margin: '6px 0 0', fontSize: 13, color: '#6b7280' }}>At least 8 characters, with a capital letter, a number and a special character (like ! @ # $).</p>
-        </div>
-        <div className="form-group">
-          <label>Confirm new password</label>
-          <input
-            type="password"
-            value={confirmPassword}
-            onChange={e => setConfirmPassword(e.target.value)}
-            placeholder="Repeat your new password"
-            required
-            minLength={8}
-            autoComplete="new-password"
-          />
-        </div>
-        {msg && (
-          <div className={`save-msg ${msg.type}`} style={{ display: 'block', marginBottom: 12 }}>
-            {msg.text}
-          </div>
-        )}
-        <button type="submit" className="btn-primary" disabled={saving}>
-          {saving ? 'Saving…' : 'Update Password'}
-        </button>
-      </form>
-      <p className="card-note" style={{ marginTop: 10 }}>
-        If you signed up with Google, set a password first via{' '}
-        <a href="/auth/forgot-password-page" style={{ color: '#534AB7' }}>Forgot password</a>.
-      </p>
-    </div>
-  );
-}
-
-// ── Billing Page ──────────────────────────────────────────────────────────────
-function BillingPage() {
-  const [billing, setBilling]       = useState(null);
-  const [business, setBusiness]     = useState(null);
-  const [loading, setLoading]       = useState(true);
-  const [showModal, setShowModal]   = useState(false);
-  const [cancelling, setCancelling] = useState(false);
-
-  useEffect(() => {
-    Promise.all([
-      apiFetch('/api/billing').then(r => r.json()),
-      apiFetch('/api/business').then(r => r.json()),
-    ])
-      .then(([bil, biz]) => {
-        setBilling(bil);
-        setBusiness(biz.business || biz);
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
-  const cancelSub = async () => {
-    setCancelling(true);
-    try {
-      await apiFetch('/api/billing/cancel', { method: 'POST' });
-      setBilling(b => ({ ...b, subscription_status: 'cancelling' }));
-      setShowModal(false);
-    } catch {}
-    setCancelling(false);
-  };
-
-  if (loading) return <Spinner />;
-
-  const statusMap = {
-    trial:      { color: '#534AB7', label: 'Trial' },
-    trialing:   { color: '#534AB7', label: 'Trial' },
-    active:     { color: '#10b981', label: 'Active' },
-    cancelling: { color: '#f59e0b', label: 'Cancelling' },
-    cancelled:  { color: '#6b7280', label: 'Cancelled' },
-    past_due:   { color: '#ef4444', label: 'Past Due' },
-    pending:    { color: '#9ca3af', label: 'Pending' },
-  };
-
-  const PLAN_LABELS = {
-    solo:    'Solo',
-    starter: 'Starter',
-    pro:     'Pro',
-  };
-
-  const UPGRADE_INFO = {
-    solo:    { to: 'starter', label: 'Starter', price: '$99/mo', desc: 'Unlock full analytics and add up to 4 team members.' },
-    starter: { to: 'pro',     label: 'Pro',     price: '$199/mo', desc: 'Unlimited team members, priority support, and advanced analytics.' },
-    pro:     null,
-  };
-
-  const status      = billing?.subscription_status || 'unknown';
-  const statusInfo  = statusMap[status] || { color: '#6b7280', label: status };
-  const plan        = business?.plan || 'solo';
-  const planLabel   = PLAN_LABELS[plan] || plan;
-  const upgradeInfo = UPGRADE_INFO[plan];
-  // Amount from API: real Stripe amount (grandfathered) or plan-derived for trial users
-  const displayAmount = billing?.amount != null ? billing.amount : null;
-  const isTrial = status === 'trial' || status === 'trialing';
-  const displayPrice = displayAmount != null
-    ? `CA$${Number(displayAmount).toFixed(2)}${isTrial ? ' (after trial ends)' : ''}`
-    : '';
-
-  const features = [
-    '24/7 AI receptionist answers every call',
-    'Automated SMS confirmations to customers',
-    'Email notifications straight to you',
-    'Google Calendar integration',
-    'Online dashboard & analytics',
-    'Unlimited bookings',
-  ];
-
-  const periodEnd = billing?.current_period_end
-    ? new Date(billing.current_period_end * 1000).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' })
-    : null;
-
-  const trialEnd = billing?.trial_end
-    ? new Date(billing.trial_end * 1000).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' })
-    : null;
-
-  const UPGRADE_FEATURES = {
-    solo:    ['Walk-in waitlist management', 'No-show deposit collection', 'Full analytics dashboard', 'Up to 4 team members'],
-    starter: ['Unlimited team members', 'Priority support', 'Advanced multi-location analytics', 'Custom AI voice & persona'],
-  };
-
-  const CARD_STYLE = {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    border: '1px solid #e5e7eb',
-    borderRadius: 12,
-    padding: '24px',
-    minHeight: 380,
-    background: '#fff',
-  };
-
-  return (
-    <div className="page-content">
-      <style>{`@media(max-width:768px){.billing-row{flex-direction:column!important;}}`}</style>
-
-      <div className="billing-row" style={{ display: 'flex', gap: 24, alignItems: 'stretch', maxWidth: 900, margin: '0 auto' }}>
-
-        {/* Left: Current plan card */}
-        <div style={CARD_STYLE}>
-          {/* Header */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-            <div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: '#1f2937', marginBottom: 2 }}>
-                Bimbly {planLabel}
-              </div>
-              <div style={{ fontSize: 28, fontWeight: 700, color: '#534AB7' }}>
-                {displayAmount != null ? `CA$${Number(displayAmount).toFixed(0)}` : '—'}
-                <span style={{ fontSize: 15, fontWeight: 400, color: '#6b7280' }}> / month</span>
-              </div>
-              {isTrial && (
-                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>after trial ends</div>
-              )}
-            </div>
-            <span className="status-badge" style={{ background: statusInfo.color + '20', color: statusInfo.color }}>
-              {statusInfo.label}
-            </span>
-          </div>
-
-          {isTrial && trialEnd && (
-            <div style={{ background: '#f3f0ff', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13 }}>
-              🎉 Your free trial ends <strong>{trialEnd}</strong> — you'll be billed automatically.
-            </div>
-          )}
-          {periodEnd && !isTrial && (
-            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>
-              Next billing date: <strong>{periodEnd}</strong>
-            </div>
-          )}
-
-          {/* Features */}
-          <div style={{ flex: 1 }}>
-            {features.map((f, i) => (
-              <div key={i} className="feature-item">
-                <span className="feature-check">✓</span>
-                {f}
-              </div>
-            ))}
-          </div>
-
-          {/* Footer */}
-          <div style={{ marginTop: 20 }}>
-            {status === 'cancelling' && (
-              <div style={{ fontSize: 13, color: '#f59e0b' }}>
-                Subscription cancels at end of billing period.
-              </div>
-            )}
-            {status !== 'cancelled' && status !== 'cancelling' && (
-              <button
-                style={{ background: 'none', border: 'none', color: '#9ca3af', fontSize: 12, cursor: 'pointer', textDecoration: 'underline', padding: 0 }}
-                onClick={() => setShowModal(true)}
-              >
-                Cancel subscription
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Right: Upgrade card or Pro message */}
-        {upgradeInfo ? (
-          <div style={{ ...CARD_STYLE, background: '#F3F0FF', border: '1px solid #e5e7eb' }}>
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 22, fontWeight: 800, color: '#1f2937', marginBottom: 2 }}>
-                Bimbly {upgradeInfo.label}
-              </div>
-              <div style={{ fontSize: 28, fontWeight: 700, color: '#534AB7' }}>
-                {upgradeInfo.price}
-                <span style={{ fontSize: 15, fontWeight: 400, color: '#6b7280' }}> / month</span>
-              </div>
-            </div>
-
-            <ul style={{ flex: 1, margin: '0', padding: '0 0 0 18px', fontSize: 14, color: '#374151', lineHeight: 2 }}>
-              {(UPGRADE_FEATURES[plan] || []).map((f, i) => <li key={i}>{f}</li>)}
-            </ul>
-
-            <div style={{ marginTop: 'auto', paddingTop: 24 }}>
-              <button
-                className="btn-primary"
-                style={{ width: '100%' }}
-                onClick={() => window.location.href = `/billing/checkout?businessId=${business?.id}&plan=${upgradeInfo.to}`}
-              >
-                Upgrade Now
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div style={{ ...CARD_STYLE, background: '#F3F0FF', border: '1px solid #e5e7eb', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#10b981', marginBottom: 8 }}>You're on our best plan.</div>
-            <div style={{ fontSize: 14, color: '#6b7280' }}>Thank you for being a Pro member!</div>
-          </div>
-        )}
-
-      </div>
-
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">Cancel subscription?</div>
-            <p className="modal-body">
-              Your service will continue until{' '}
-              <strong>{periodEnd || 'the end of the billing period'}</strong>.
-              After that, your AI receptionist will stop answering calls.
-            </p>
-            <div className="modal-actions">
-              <button className="btn-ghost" onClick={() => setShowModal(false)}>
-                Keep Subscription
-              </button>
-              <button className="btn-danger" onClick={cancelSub} disabled={cancelling}>
-                {cancelling ? 'Cancelling...' : 'Yes, Cancel'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Onboarding Page ───────────────────────────────────────────────────────────
-const SERVICE_DEFAULTS = {
-  'Barbershop': [
-    { name: "Men's Haircut", price: '35', duration_minutes: '30' },
-    { name: 'Beard Trim',    price: '20', duration_minutes: '20' },
-    { name: "Kid's Haircut", price: '25', duration_minutes: '20' },
-    { name: 'Shape Up',      price: '25', duration_minutes: '20' },
-  ],
-  'Hair Salon': [
-    { name: 'Haircut',     price: '55',  duration_minutes: '45' },
-    { name: 'Blowout',     price: '45',  duration_minutes: '45' },
-    { name: 'Colour',      price: '120', duration_minutes: '120' },
-    { name: 'Highlights',  price: '150', duration_minutes: '150' },
-  ],
-  'Nail Salon': [
-    { name: 'Manicure',        price: '35', duration_minutes: '30' },
-    { name: 'Pedicure',        price: '45', duration_minutes: '45' },
-    { name: 'Gel Manicure',    price: '50', duration_minutes: '45' },
-    { name: 'Acrylic Full Set',price: '65', duration_minutes: '60' },
-  ],
-};
-
-const TEAM_LABEL = {
-  'Barbershop': 'Who are your team members?',
-  'Hair Salon':  'Who are your team members?',
-  'Nail Salon':  'Who are your team members?',
-};
-
-function OnboardingPage({ setPage }) {
-  const [step, setStep]     = useState(1);
-  const [saving, setSaving] = useState(false);
-  const [newBarber, setNewBarber] = useState('');
-  const [bizPhone, setBizPhone]   = useState(null);
-  const [stepError, setStepError] = useState('');
-  const [loadingData, setLoadingData] = useState(true);
-  const [plan, setPlan]               = useState('solo');
-  const [ownerName, setOwnerName]     = useState('');
-  const [data, setData]   = useState({
-    name:          '',
-    phone:         '',
-    address:       '',
-    ai_name:       '',
-    business_type: 'Barbershop',
-    timezone:      'America/Toronto',
-    business_hours: {},
-    services:      SERVICE_DEFAULTS['Barbershop'],
-    barbers:       [],
-  });
-
-  const setField = (key, val) => setData(d => ({ ...d, [key]: val }));
-
-  // Pre-populate form with existing business data on mount
-  useEffect(() => {
-    const BIZ_TYPE_MAP = {
-      'barbershop': 'Barbershop',
-      'hair-salon': 'Hair Salon',
-      'hair salon': 'Hair Salon',
-      'nail-salon': 'Nail Salon',
-      'nail salon': 'Nail Salon',
-    };
-    Promise.all([
-      apiFetch('/api/business').then(r => r.json()),
-      apiFetch('/api/services').then(r => r.json()),
-    ])
-      .then(([b, s]) => {
-        const biz = b.business || b;
-        const svcs = s.services || s || [];
-        const bizType = BIZ_TYPE_MAP[(biz.business_type || '').toLowerCase()] || biz.business_type || 'Barbershop';
-        setPlan(biz.plan || 'solo');
-        setOwnerName(biz.owner_name || '');
-        setData({
-          name:           biz.name          || '',
-          phone:          biz.phone         || '',
-          address:        biz.address       || '',
-          ai_name:        biz.ai_name       || '',
-          business_type:  bizType,
-          timezone:       biz.timezone      || 'America/Toronto',
-          business_hours: biz.business_hours || {},
-          barbers:        (() => {
-                            const src = biz.team_members || biz.barbers;
-                            if (src && src.length > 0) {
-                              return src.map(m => typeof m === 'string' ? { name: m, role: '', calendarId: '' } : { role: '', calendarId: '', ...m });
-                            }
-                            return biz.owner_name ? [{ name: biz.owner_name, role: '', calendarId: '' }] : [];
-                          })(),
-          services:       svcs.length > 0 ? svcs : (SERVICE_DEFAULTS[bizType] || SERVICE_DEFAULTS['Barbershop']),
-        });
-      })
-      .catch(() => {})
-      .finally(() => setLoadingData(false));
-  }, []);
-
-  // Reset services when business type changes (skip on initial mount — handled by pre-populate effect)
-  const isFirstRender = useRef(true);
-  useEffect(() => {
-    if (isFirstRender.current) { isFirstRender.current = false; return; }
-    setData(d => ({ ...d, services: SERVICE_DEFAULTS[d.business_type] || SERVICE_DEFAULTS['Barbershop'] }));
-  }, [data.business_type]);
-
-  // Fetch actual business phone for the final step (step 3 for solo, step 4 for others)
-  useEffect(() => {
-    const lastStep = plan === 'solo' ? 3 : 4;
-    if (step === lastStep) {
-      apiFetch('/api/business')
-        .then(r => r.json())
-        .then(res => setBizPhone((res.business || res).twilio_phone || (res.business || res).phone || null))
-        .catch(() => {});
-    }
-  }, [step, plan]);
-
-  const updateSvc = (i, key, val) =>
-    setData(d => ({
-      ...d,
-      services: d.services.map((s, j) => j === i ? { ...s, [key]: val } : s),
-    }));
-
-  const removeSvc = i =>
-    setData(d => ({ ...d, services: d.services.filter((_, j) => j !== i) }));
-
-  const addBarber = () => {
-    if (newBarber.trim()) {
-      setData(d => ({ ...d, barbers: [...d.barbers, { name: newBarber.trim(), role: '', calendarId: '' }] }));
-      setNewBarber('');
-    }
-  };
-
-  const complete = async () => {
-    console.log('[complete] called with:', {
-      name: data.name,
-      phone: data.phone,
-      address: data.address,
-      ai_name: data.ai_name,
-      business_type: data.business_type,
-      timezone: data.timezone,
-      barbers: data.barbers,
-    });
-    setSaving(true);
-    try {
-      await apiFetch('/api/business', {
-        method: 'PUT',
-        body: JSON.stringify({
-          name:           data.name,
-          phone:          data.phone,
-          address:        data.address,
-          ai_name:        data.ai_name,
-          business_type:  data.business_type,
-          timezone:       data.timezone,
-          business_hours: data.business_hours,
-          team_members:   data.barbers,
-        }),
-      });
-      console.log('[complete] data.services to save:', JSON.stringify(data.services));
-      await apiFetch('/api/services/replace', {
-        method: 'PUT',
-        body: JSON.stringify({ services: data.services }),
-      });
-      // Notify server to update Vapi assistant with finalised config
-      try {
-        await apiFetch('/onboarding/complete', {
-          method: 'POST',
-          body: JSON.stringify({
-            services: data.services,
-            barbers: data.barbers,
-            timezone: data.timezone,
-            supported_languages: data.supported_languages,
-          }),
-        });
-      } catch (vapiErr) {
-        // Non-fatal — log but don't block the user from proceeding
-        console.warn('[complete] Vapi update failed (non-fatal):', vapiErr);
-      }
-      setPage('home');
-    } catch(err) {
-      console.error('[complete] failed:', err);
-    }
-    setSaving(false);
-  };
-
-  const validate = (stepNum) => {
-    if (stepNum === 1) {
-      if (!data.name.trim()) return 'Business Name is required.';
-      if (!data.phone.trim()) return 'Business Phone is required.';
-      if (!data.business_type) return 'Business Type is required.';
-      if (!data.timezone) return 'Timezone is required.';
-    }
-    if (stepNum === 2) {
-      if (data.services.length === 0) return 'Add at least one service.';
-      for (const svc of data.services) {
-        if (!svc.name.trim()) return 'Each service must have a name.';
-        if (!svc.price) return 'Each service must have a price.';
-      }
-    }
-    return '';
-  };
-
-  if (loadingData) return <Spinner />;
-
-  return (
-    <div className="onboarding-wrap">
-      <div className="onboarding-card">
-        <div className="step-indicator">
-          {(plan === 'solo' ? [1, 2, 3] : [1, 2, 3, 4]).map(s => (
-            <div key={s} className={`step-dot ${s === step ? 'active' : s < step ? 'done' : ''}`}>
-              {s < step ? '✓' : s}
-            </div>
-          ))}
-        </div>
-
-        {/* Step 1 */}
-        {step === 1 && (
-          <div className="step-content">
-            <h2>Let's set up your AI receptionist</h2>
-            <p className="step-sub">Tell us about your business so we can personalize your AI.</p>
-            <div className="form-group">
-              <label>Business Name</label>
-              <input
-                value={data.name}
-                onChange={e => setField('name', e.target.value)}
-                placeholder="Sam's Barbershop"
-              />
-            </div>
-            <div className="form-group">
-              <label>Your Business Phone Number</label>
-              <input
-                value={data.phone}
-                onChange={e => setField('phone', e.target.value)}
-                placeholder="+1 (416) 555-0000"
-              />
-              <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>
-                This is your current number that customers call. You'll forward this to your Bimbly number in the last step.
-              </p>
-            </div>
-            <div className="form-group">
-              <label>Address</label>
-              <input
-                value={data.address}
-                onChange={e => setField('address', e.target.value)}
-                placeholder="123 Main St, Toronto, ON"
-              />
-            </div>
-            <div className="form-group">
-              <label>AI Receptionist Name</label>
-              <input
-                value={data.ai_name}
-                onChange={e => setField('ai_name', e.target.value)}
-                placeholder="e.g. Alex"
-              />
-            </div>
-            <div className="form-group">
-              <label>Business Type</label>
-              <select value={data.business_type} onChange={e => setField('business_type', e.target.value)}>
-                <option value="Barbershop">Barbershop</option>
-                <option value="Hair Salon">Hair Salon</option>
-                <option value="Nail Salon">Nail Salon</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label>Your Timezone</label>
-              <select value={data.timezone} onChange={e => setField('timezone', e.target.value)}>
-                <option value="America/Toronto">Eastern Time (Toronto)</option>
-                <option value="America/Vancouver">Pacific Time (Vancouver)</option>
-                <option value="America/Edmonton">Mountain Time (Calgary)</option>
-                <option value="America/Winnipeg">Central Time (Winnipeg)</option>
-                <option value="America/Halifax">Atlantic Time (Halifax)</option>
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2 */}
-        {step === 2 && (
-          <div className="step-content">
-            <h2>What services do you offer?</h2>
-            <p className="step-sub">
-              Add your services so customers can book the right appointment.
-            </p>
-            {data.services.map((svc, i) => (
-              <div key={i} className="svc-row">
-                <input
-                  placeholder="Service name"
-                  value={svc.name}
-                  onChange={e => updateSvc(i, 'name', e.target.value)}
-                />
-                <input
-                  placeholder="$ Price"
-                  type="number"
-                  value={svc.price}
-                  style={{ width: 90 }}
-                  onChange={e => updateSvc(i, 'price', e.target.value)}
-                />
-                <button className="btn-ghost" style={{ height: 40, padding: '0 12px' }} onClick={() => removeSvc(i)}>×</button>
-              </div>
-            ))}
-            <button
-              className="btn-outline"
-              style={{ marginTop: 8 }}
-              onClick={() => setData(d => ({
-                ...d,
-                services: [...d.services, { name: '', price: '', duration_minutes: '30' }],
-              }))}
-            >
-              + Add Service
-            </button>
-          </div>
-        )}
-
-        {/* Step 3 — team (solo skips this, goes to step 3 = final/forwarding) */}
-        {step === 3 && plan !== 'solo' && (
-          <div className="step-content">
-            <h2>{TEAM_LABEL[data.business_type] || 'Who are your team members?'}</h2>
-            <p className="step-sub">
-              Customers can request a specific team member by name when they call.
-              {plan === 'starter' && <span style={{ display: 'block', fontSize: 12, color: '#9ca3af', marginTop: 4 }}>Starter plan includes up to 4 team members.</span>}
-            </p>
-            <div className="barbers-list" style={{ marginBottom: 16 }}>
-              {data.barbers.map((barber, i) => (
-                <div key={i} className="barber-chip">
-                  {typeof barber === 'string' ? barber : barber.name}
-                  {i === 0 && <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 4 }}>(you)</span>}
-                  {/* Prevent removing the owner (index 0) */}
-                  {i > 0 && (
-                    <button
-                      className="chip-remove"
-                      onClick={() => setData(d => ({ ...d, barbers: d.barbers.filter((_, j) => j !== i) }))}
-                    >×</button>
-                  )}
-                </div>
-              ))}
-              {data.barbers.length === 0 && (
-                <span style={{ color: '#9ca3af', fontSize: 13 }}>No team members yet.</span>
-              )}
-            </div>
-            {(plan === 'pro' || data.barbers.length < 4) && (
-              <div className="add-barber-row" style={{ padding: 0 }}>
-                <input
-                  placeholder="Name"
-                  value={newBarber}
-                  onChange={e => setNewBarber(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && addBarber()}
-                />
-                <button className="btn-outline" onClick={addBarber}>Add</button>
-              </div>
-            )}
-            {plan === 'starter' && data.barbers.length >= 4 && (
-              <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>Team member limit reached for Starter plan.</p>
-            )}
-          </div>
-        )}
-
-        {/* Step 3 (solo) = forwarding step */}
-
-        {/* Step 4 (or step 3 for solo) */}
-        {((plan === 'solo' && step === 3) || (plan !== 'solo' && step === 4)) && (
-          <div className="step-content">
-            <h2>You're almost live!</h2>
-            <p className="step-sub">
-              Forward your business phone number to your Bimbly number to start receiving bookings.
-            </p>
-            <div className="forward-box">
-              <div className="forward-label">Your Bimbly Number</div>
-              <div className="forward-number">{bizPhone || '...'}</div>
-            </div>
-            <div className="instructions">
-              <div className="instr-title">iPhone</div>
-              <ol>
-                <li>Go to <strong>Settings → Phone → Call Forwarding</strong></li>
-                <li>Turn on <strong>Call Forwarding</strong></li>
-                <li>Enter your Bimbly number above</li>
-              </ol>
-              <div className="instr-title" style={{ marginTop: 20 }}>Android</div>
-              <ol>
-                <li>Open <strong>Phone app → Settings → Calls</strong></li>
-                <li>Tap <strong>Call forwarding → Always forward</strong></li>
-                <li>Enter your Bimbly number above</li>
-              </ol>
-            </div>
-          </div>
-        )}
-
-        {stepError && (
-          <div style={{ color: '#ef4444', fontSize: 13, padding: '8px 0 0', marginTop: 4 }}>{stepError}</div>
-        )}
-
-        <div className="step-actions">
-          {step > 1 && (
-            <button className="btn-ghost" onClick={() => {
-              setStepError('');
-              // Solo: back from step 3 goes to step 2 (skipping team step)
-              setStep(s => s - 1);
-            }}>Back</button>
-          )}
-          {((plan === 'solo' && step < 3) || (plan !== 'solo' && step < 4)) && (
-            <button className="btn-primary" onClick={() => {
-              const err = validate(step);
-              if (err) { setStepError(err); return; }
-              setStepError('');
-              // Solo: jump from step 2 to step 3 (forwarding), skip team step
-              setStep(s => s + 1);
-            }}>
-              Continue →
-            </button>
-          )}
-          {((plan === 'solo' && step === 3) || (plan !== 'solo' && step === 4)) && (
-            <button className="btn-primary" onClick={complete} disabled={saving}>
-              {saving ? 'Setting up...' : "I've forwarded my number →"}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── ClientsPage ───────────────────────────────────────────────────────────────
-function ClientsPage({ clients, setClients, setPage }) {
-  const [search, setSearch]       = useState(window._clientsSearch || '');
-  const [tagFilter, setTagFilter] = useState(null);
-  useEffect(() => { window._clientsSearch = null; }, []);
-  const [showForm, setShowForm]   = useState(false);
-  const [form, setForm]           = useState({ name: '', phone: '', notes: '', tags: '' });
-  const [saving, setSaving]       = useState(false);
-  const [error, setError]         = useState('');
-
-  // Collect all unique tags across all clients
-  const allTags = [...new Set(clients.flatMap(c => c.tags || []))].sort();
-
-  const filtered = clients.filter(c => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || c.name.toLowerCase().includes(q) || (c.phone || '').includes(q);
-    const matchTag = !tagFilter || (c.tags || []).includes(tagFilter);
-    return matchSearch && matchTag;
-  });
-
-  async function handleCreate(e) {
-    e.preventDefault();
-    setSaving(true); setError('');
-    try {
-      const r = await apiFetch('/api/clients', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: form.name,
-          phone: form.phone,
-          notes: form.notes || undefined,
-          tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : []
-        })
-      });
-      const d = await r.json();
-      if (!r.ok) { setError(d.error || 'Failed to create client.'); return; }
-      setClients(prev => [d.client, ...prev]);
-      setShowForm(false);
-      setForm({ name: '', phone: '', notes: '', tags: '' });
-    } catch (err) {
-      setError('Network error.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="page-content">
-      <div className="filter-bar" style={{ gap: '8px', flexWrap: 'wrap' }}>
-        <input
-          placeholder="Search by name or phone..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{ padding: '6px 12px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '14px', minWidth: '220px' }}
-        />
-        {allTags.map(tag => (
-          <button
-            key={tag}
-            className={`filter-btn ${tagFilter === tag ? 'active' : ''}`}
-            onClick={() => setTagFilter(tagFilter === tag ? null : tag)}
-          >
-            {tag}
-          </button>
-        ))}
-        <button className="filter-btn" style={{ marginLeft: 'auto' }} onClick={() => setShowForm(s => !s)}>
-          + Add Client
-        </button>
-      </div>
-
-      {showForm && (
-        <div className="card" style={{ marginBottom: '16px' }}>
-          <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '480px' }}>
-            <input required placeholder="Name *" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }} />
-            <input required placeholder="Phone * (e.g. +16471234567)" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }} />
-            <textarea placeholder="Notes (optional)" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px', resize: 'vertical', minHeight: '60px' }} />
-            <input placeholder="Tags (comma-separated, e.g. VIP, regular)" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
-              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }} />
-            {error && <div style={{ color: '#e53e3e', fontSize: '13px' }}>{error}</div>}
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button type="submit" className="filter-btn active" disabled={saving}>{saving ? 'Saving...' : 'Add Client'}</button>
-              <button type="button" className="filter-btn" onClick={() => { setShowForm(false); setError(''); }}>Cancel</button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      <div className="card">
-        {filtered.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">👤</div>
-            <div className="empty-title">No clients yet</div>
-            <div className="empty-sub">Clients are created automatically when bookings come in</div>
-          </div>
-        ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Name</th><th>Phone</th><th>Last Visit</th><th>Visits</th>
-                  <th>Preferred Service</th><th>Preferred Barber</th><th>Tags</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(c => (
-                  <tr key={c.id} style={{ cursor: 'pointer' }}
-                    onClick={() => { window._clientProfileId = c.id; setPage('client-profile'); }}>
-                    <td><div className="cell-name" style={{ color: '#6366f1', textDecoration: 'underline' }}>{c.name}</div></td>
-                    <td>{c.phone || '—'}</td>
-                    <td>{c.last_visit ? new Date(c.last_visit + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
-                    <td>{c.visit_count || 0}</td>
-                    <td>{c.preferred_service || '—'}</td>
-                    <td>{c.preferred_barber || '—'}</td>
-                    <td>{(c.tags || []).join(', ') || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-// ── ClientProfilePage ─────────────────────────────────────────────────────────
-function ClientProfilePage({ clients, setClients, setPage }) {
-  const clientId = window._clientProfileId;
-  const [client, setClient]     = useState(null);
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [editing, setEditing]   = useState(false);
-  const [form, setForm]         = useState({ name: '', notes: '', tags: '' });
-  const [saving, setSaving]     = useState(false);
-  const [confirmDel, setConfirmDel] = useState(false);
-  const [error, setError]       = useState('');
-
-  const handleDepositAction = async (bookingId, action) => {
-    const endpoint = action === 'no-show' ? 'no-show' : 'waive-deposit';
-    try {
-      const res = await apiFetch(`/api/bookings/${bookingId}/${endpoint}`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error || 'Action failed.'); return; }
-      setBookings(bs => bs.map(b => b.id === bookingId ? data.booking : b));
-    } catch { alert('Action failed. Please try again.'); }
-  };
-
-  useEffect(() => {
-    if (!clientId) { setPage('clients'); return; }
-    apiFetch(`/api/clients/${clientId}`)
-      .then(r => r.json())
-      .then(d => {
-        if (d.client) {
-          setClient(d.client);
-          setBookings(d.bookings || []);
-          setForm({ name: d.client.name, notes: d.client.notes || '', tags: (d.client.tags || []).join(', ') });
-        } else {
-          setPage('clients');
-        }
-      })
-      .catch(() => setPage('clients'))
-      .finally(() => setLoading(false));
-  }, [clientId]);
-
-  async function handleSave() {
-    setSaving(true); setError('');
-    try {
-      const r = await apiFetch(`/api/clients/${clientId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: form.name,
-          notes: form.notes || null,
-          tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : []
-        })
-      });
-      const d = await r.json();
-      if (!r.ok) { setError(d.error); return; }
-      setClient(d.client);
-      setClients(prev => prev.map(c => c.id === clientId ? { ...c, ...d.client } : c));
-      setEditing(false);
-    } catch { setError('Network error.'); }
-    finally { setSaving(false); }
-  }
-
-  async function handleDelete() {
-    try {
-      const r = await apiFetch(`/api/clients/${clientId}`, { method: 'DELETE' });
-      if (!r.ok) { const d = await r.json(); setError(d.error || 'Delete failed.'); return; }
-      setClients(prev => prev.filter(c => c.id !== clientId));
-      setPage('clients');
-    } catch { setError('Delete failed.'); }
-  }
-
-  if (loading) return <Spinner />;
-  if (!client) return null;
-
-  return (
-    <div className="page-content">
-      <button className="filter-btn" onClick={() => setPage('clients')} style={{ marginBottom: '16px' }}>← Back to Clients</button>
-
-      <div className="card" style={{ marginBottom: '16px' }}>
-        {editing ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '480px' }}>
-            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '16px', fontWeight: 600 }} />
-            <textarea placeholder="Notes" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px', resize: 'vertical', minHeight: '80px' }} />
-            <input placeholder="Tags (comma-separated)" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
-              style={{ padding: '8px', border: '1px solid #e2e8f0', borderRadius: '6px' }} />
-            {error && <div style={{ color: '#e53e3e', fontSize: '13px' }}>{error}</div>}
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button className="filter-btn active" onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
-              <button className="filter-btn" onClick={() => { setEditing(false); setError(''); }}>Cancel</button>
-            </div>
-          </div>
-        ) : (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: '22px' }}>{client.name}</h2>
-                <div style={{ color: '#64748b', marginTop: '4px' }}>{client.phone}</div>
-                {(client.tags || []).length > 0 && (
-                  <div style={{ marginTop: '8px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                    {client.tags.map(tag => (
-                      <span key={tag} style={{ background: '#ede9fe', color: '#6d28d9', padding: '2px 10px', borderRadius: '12px', fontSize: '12px' }}>{tag}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                <button className="filter-btn" onClick={() => setEditing(true)}>Edit</button>
-                <button className="filter-btn" style={{ color: '#e53e3e' }} onClick={() => setConfirmDel(true)}>Delete</button>
-              </div>
-            </div>
-
-            {client.notes && (
-              <div style={{ marginTop: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', fontSize: '14px', color: '#475569' }}>
-                {client.notes}
-              </div>
-            )}
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', marginTop: '20px' }}>
-              {[
-                { label: 'Total Visits', value: client.visit_count ?? 0 },
-                { label: 'Last Visit', value: client.last_visit ? new Date(client.last_visit + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : '—' },
-                { label: 'Preferred Service', value: client.preferred_service || '—' },
-                { label: 'Preferred Barber', value: client.preferred_barber || '—' },
-              ].map(stat => (
-                <div key={stat.label} style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</div>
-                  <div style={{ fontSize: '18px', fontWeight: 700, marginTop: '4px' }}>{stat.value}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {confirmDel && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ background: '#fff', borderRadius: '12px', padding: '24px', maxWidth: '380px', width: '90%' }}>
-            <h3 style={{ margin: '0 0 8px' }}>Delete {client.name}?</h3>
-            <p style={{ color: '#64748b', fontSize: '14px', margin: '0 0 20px' }}>
-              The client record will be removed. Their booking history will be preserved.
-            </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button className="filter-btn" onClick={() => setConfirmDel(false)}>Cancel</button>
-              <button className="filter-btn" style={{ background: '#fee2e2', color: '#e53e3e', border: 'none' }} onClick={handleDelete}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="card">
-        <h3 style={{ margin: '0 0 16px', fontSize: '16px' }}>Booking History</h3>
-        {bookings.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">📅</div>
-            <div className="empty-title">No bookings yet</div>
-          </div>
-        ) : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr><th>Date</th><th>Time</th><th>Service</th><th>Team Member</th><th>Special Requests</th><th>Deposit</th></tr>
-              </thead>
-              <tbody>
-                {bookings.map(b => (
-                  <tr key={b.id}>
-                    <td>{b.appointment_date ? new Date(b.appointment_date + 'T00:00:00').toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}</td>
-                    <td>{b.appointment_time || '—'}</td>
-                    <td>{Array.isArray(b.service_ids) ? b.service_ids.join(', ') : b.service_ids || '—'}</td>
-                    <td>{b.preferred_barber || '—'}</td>
-                    <td className="cell-requests">{b.special_requests || '—'}</td>
-                    <td>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <DepositBadge status={b.deposit_status} />
-                        {b.deposit_status === 'secured' && (
-                          <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                            <button
-                              className="btn-outline"
-                              style={{ fontSize: 12, padding: '2px 8px', color: '#dc2626', borderColor: '#dc2626' }}
-                              onClick={() => {
-                                if (confirm('Charge deposit for no-show?')) {
-                                  handleDepositAction(b.id, 'no-show');
-                                }
-                              }}
-                            >
-                              No-Show
-                            </button>
-                            <button
-                              className="btn-outline"
-                              style={{ fontSize: 12, padding: '2px 8px' }}
-                              onClick={() => handleDepositAction(b.id, 'waive')}
-                            >
-                              Waive
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── QueuePage ─────────────────────────────────────────────────────────────────
-function QueuePage() {
-  const [queue, setQueue]     = useState([]);
+// ── Walk-in queue page ────────────────────────────────────────────────────────
+function QueuePage({ business, go, onQueueChange }) {
+  const toast = useToast();
+  const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState({});
+  const [busy, setBusy] = useState({});
+  const [, tick] = useState(0);
 
-  const fetchQueue = () => {
-    apiFetch('/api/queue')
-      .then(r => r.json())
-      .then(d => setQueue(d.queue || []))
+  const fetchQueue = useCallback(() => {
+    return api('/api/queue')
+      .then(d => { setQueue(d.queue || []); onQueueChange && onQueueChange(d.queue || []); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  };
+  }, [onQueueChange]);
 
   useEffect(() => {
     fetchQueue();
-    const interval = setInterval(fetchQueue, 15000);
-    return () => clearInterval(interval);
-  }, []);
+    const poll = setInterval(fetchQueue, 15000);
+    const clock = setInterval(() => tick(n => n + 1), 60000);
+    return () => { clearInterval(poll); clearInterval(clock); };
+  }, [fetchQueue]);
 
-  const action = async (id, endpoint, label) => {
-    setActionLoading(s => ({ ...s, [id + endpoint]: true }));
+  const act = async (entry, endpoint, doneText) => {
+    setBusy(s => ({ ...s, [entry.id]: endpoint }));
     try {
-      const res = await apiFetch(`/api/queue/${id}/${endpoint}`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error || `${label} failed.`); return; }
-      setQueue(q => q.filter(e => e.id !== id));
-    } catch { alert(`${label} failed. Please try again.`); }
-    finally { setActionLoading(s => ({ ...s, [id + endpoint]: false })); }
-  };
-
-  const STATUS_COLORS = {
-    waiting:  { bg: '#fef3c7', color: '#92400e', label: 'Waiting' },
-    notified: { bg: '#d1fae5', color: '#065f46', label: 'Notified' },
+      await api(`/api/queue/${entry.id}/${endpoint}`, { method: 'POST' });
+      if (endpoint === 'notify') {
+        setQueue(q => q.map(e => e.id === entry.id ? { ...e, status: 'notified' } : e));
+      } else {
+        setQueue(q => q.filter(e => e.id !== entry.id));
+      }
+      toast(doneText);
+      fetchQueue();
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      setBusy(s => ({ ...s, [entry.id]: null }));
+    }
   };
 
   if (loading) return <Spinner />;
 
   return (
     <div className="page-content">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <div style={{ fontSize: 13, color: '#6b7280' }}>
-          {queue.length === 0 ? 'No one in queue' : `${queue.length} customer${queue.length > 1 ? 's' : ''} waiting`}
-        </div>
-        <button className="btn-outline" style={{ fontSize: 13 }} onClick={fetchQueue}>Refresh</button>
+      <div className="toolbar">
+        <p className="muted">
+          {queue.length === 0 ? 'No one is waiting.' : <><strong style={{ color: 'var(--graphite)' }}>{queue.length}</strong> {queue.length === 1 ? 'person' : 'people'} in line. Updates every 15 seconds.</>}
+        </p>
+        <span className="spacer"></span>
+        <button className="btn btn--secondary" onClick={() => { setLoading(true); fetchQueue(); }}><Icon name="refresh" />Refresh</button>
       </div>
 
-      {queue.length === 0 ? (
-        <div className="card">
-          <div className="empty-state">
-            <div className="empty-icon">🪑</div>
-            <div className="empty-title">Queue is empty</div>
-            <div className="empty-sub">Customers can join via QR code in Settings → Walk-in Queue</div>
-          </div>
-        </div>
-      ) : (
-        <div className="card">
+      {!business?.queue_enabled && (
+        <Notice type="warn">
+          Walk-in check-in is turned off. <button className="btn-link" onClick={() => go('settings', 'walkins')}>Turn it on in Settings</button> to get your QR code.
+        </Notice>
+      )}
+
+      <section className="card">
+        {queue.length === 0 ? (
+          <EmptyState icon="queue" title="The line is empty"
+            sub="Customers join by scanning your walk-in QR code. You'll see them here with how long they've waited."
+            action={<button className="btn btn--secondary" onClick={() => go('settings', 'walkins')}>Get the QR code</button>} />
+        ) : (
           <div className="table-wrap">
             <table className="data-table">
               <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Name</th>
-                  <th>Phone</th>
-                  <th>Service</th>
-                  <th>Team Member</th>
-                  <th>Status</th>
-                  <th>Waited</th>
-                  <th>Actions</th>
-                </tr>
+                <tr><th>#</th><th>Customer</th><th>Service</th><th>Team member</th><th>Waiting</th><th>Status</th><th className="col-actions">Actions</th></tr>
               </thead>
               <tbody>
                 {queue.map(entry => {
-                  const s = STATUS_COLORS[entry.status] || { bg: '#f3f4f6', color: '#6b7280', label: entry.status };
-                  const waited = Math.floor((Date.now() - new Date(entry.created_at).getTime()) / 60000);
-                  const isNotifying = actionLoading[entry.id + 'notify'];
-                  const isServing   = actionLoading[entry.id + 'serve'];
-                  const isRemoving  = actionLoading[entry.id + 'remove'];
+                  const waited = Math.max(0, Math.floor((Date.now() - new Date(entry.created_at).getTime()) / 60000));
+                  const working = busy[entry.id];
                   return (
                     <tr key={entry.id}>
-                      <td style={{ fontWeight: 700, color: '#534AB7' }}>{entry.position}</td>
-                      <td><div className="cell-name">{entry.customer_name}</div></td>
-                      <td>{entry.customer_phone}</td>
-                      <td>{entry.service || '—'}</td>
-                      <td>{entry.preferred_barber || '—'}</td>
+                      <td className="cell-name num">{entry.position}</td>
                       <td>
-                        <span className="status-badge" style={{ background: s.bg, color: s.color }}>
-                          {s.label}
-                        </span>
+                        <div className="cell-name">{entry.customer_name}</div>
+                        <div className="cell-sub num">{fmtPhone(entry.customer_phone)}</div>
                       </td>
-                      <td style={{ color: waited > 20 ? '#ef4444' : '#374151' }}>{waited}m</td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <td>{entry.service || <span className="muted">-</span>}</td>
+                      <td>{entry.preferred_barber || <span className="muted">Anyone</span>}</td>
+                      <td className="num" style={{ color: waited > 20 ? 'var(--stamp-btn)' : undefined, fontWeight: waited > 20 ? 700 : 400 }}>{waited} min</td>
+                      <td><span className={`badge ${entry.status === 'notified' ? 'badge--green' : 'badge--amber'}`}>{entry.status === 'notified' ? 'Notified' : 'Waiting'}</span></td>
+                      <td className="col-actions">
+                        <div className="table-actions">
                           {entry.status === 'waiting' && (
-                            <button
-                              className="btn-outline"
-                              style={{ fontSize: 12, padding: '3px 10px', color: '#059669', borderColor: '#059669' }}
-                              disabled={isNotifying}
-                              onClick={() => action(entry.id, 'notify', 'Notify')}
-                            >
-                              {isNotifying ? '...' : 'Notify'}
+                            <button className="btn btn--primary btn--sm" disabled={!!working} onClick={() => act(entry, 'notify', `Texted ${entry.customer_name}`)}>
+                              <Icon name="bell" />{working === 'notify' ? 'Texting…' : 'Notify'}
                             </button>
                           )}
-                          <button
-                            className="btn-outline"
-                            style={{ fontSize: 12, padding: '3px 10px' }}
-                            disabled={isServing}
-                            onClick={() => action(entry.id, 'serve', 'Serve')}
-                          >
-                            {isServing ? '...' : 'Served'}
+                          <button className="btn btn--secondary btn--sm" disabled={!!working} onClick={() => act(entry, 'serve', `${entry.customer_name} marked as served`)}>
+                            <Icon name="check" />Served
                           </button>
-                          <button
-                            className="btn-outline"
-                            style={{ fontSize: 12, padding: '3px 10px', color: '#9ca3af', borderColor: '#d1d5db' }}
-                            disabled={isRemoving}
-                            onClick={() => action(entry.id, 'remove', 'Remove')}
-                          >
-                            {isRemoving ? '...' : 'Remove'}
+                          <button className="btn btn--ghost btn--sm btn--icon" disabled={!!working} title="Remove from line" aria-label={`Remove ${entry.customer_name}`}
+                            onClick={() => act(entry, 'remove', `${entry.customer_name} removed`)}>
+                            <Icon name="x" />
                           </button>
                         </div>
                       </td>
@@ -2443,22 +909,1492 @@ function QueuePage() {
               </tbody>
             </table>
           </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+// ── Clients ───────────────────────────────────────────────────────────────────
+function parseTags(s) {
+  return s ? s.split(',').map(t => t.trim()).filter(Boolean) : [];
+}
+
+function ClientsPage({ clients, setClients, go, initialSearch }) {
+  const toast = useToast();
+  const [search, setSearch] = useState(initialSearch || '');
+  const [tagFilter, setTagFilter] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ name: '', phone: '', notes: '', tags: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => { setSearch(initialSearch || ''); }, [initialSearch]);
+
+  const allTags = [...new Set(clients.flatMap(c => c.tags || []))].sort();
+  const q = search.trim().toLowerCase();
+  const filtered = clients.filter(c => {
+    const matchSearch = !q || (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q.replace(/[^\d+]/g, '') || q);
+    const matchTag = !tagFilter || (c.tags || []).includes(tagFilter);
+    return matchSearch && matchTag;
+  });
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    setSaving(true); setError('');
+    try {
+      const d = await api('/api/clients', {
+        method: 'POST',
+        body: JSON.stringify({ name: form.name.trim(), phone: form.phone.trim(), notes: form.notes || undefined, tags: parseTags(form.tags) }),
+      });
+      setClients(prev => [d.client, ...prev]);
+      setShowForm(false);
+      setForm({ name: '', phone: '', notes: '', tags: '' });
+      toast(`${d.client.name} added`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="page-content">
+      <div className="toolbar">
+        <div className="search">
+          <Icon name="search" />
+          <input className="input" type="search" placeholder="Search by name or phone" aria-label="Search clients" value={search} onChange={e => setSearch(e.target.value)} />
+        </div>
+        {allTags.length > 0 && (
+          <select className="select" style={{ width: 'auto', minWidth: 150 }} aria-label="Filter by tag" value={tagFilter} onChange={e => setTagFilter(e.target.value)}>
+            <option value="">All tags</option>
+            {allTags.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
+        <span className="spacer"></span>
+        {!showForm && <button className="btn btn--primary" onClick={() => setShowForm(true)}><Icon name="plus" />Add client</button>}
+      </div>
+
+      {showForm && (
+        <form onSubmit={handleCreate}>
+          <Card title="New client" description="Clients are also added automatically when someone books by phone."
+            footer={<>
+              {error && <span className="status status--error">{error}</span>}
+              <button type="button" className="btn btn--secondary" onClick={() => { setShowForm(false); setError(''); }}>Cancel</button>
+              <button type="submit" className="btn btn--primary" disabled={saving}>{saving ? 'Adding…' : 'Add client'}</button>
+            </>}>
+            <div className="form-grid">
+              <Field label="Name" htmlFor="c-name">
+                <input id="c-name" className="input" required autoFocus value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              </Field>
+              <Field label="Phone" htmlFor="c-phone" hint="Include the area code, e.g. 416 555 0123">
+                <input id="c-phone" className="input" type="tel" required value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+              </Field>
+              <Field label="Tags" optional htmlFor="c-tags" hint="Separate with commas, e.g. VIP, regular" className="span-2">
+                <input id="c-tags" className="input" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} />
+              </Field>
+              <Field label="Notes" optional htmlFor="c-notes" className="span-2">
+                <textarea id="c-notes" className="textarea" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+              </Field>
+            </div>
+          </Card>
+        </form>
+      )}
+
+      <section className="card">
+        {filtered.length === 0 ? (
+          clients.length === 0
+            ? <EmptyState icon="users" title="No clients yet" sub="Everyone who books through Bimbly is added here automatically, with their visit history." />
+            : <EmptyState icon="search" title="No matches" sub="Try a different name or phone number." />
+        ) : (
+          <>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr><th>Client</th><th>Last visit</th><th className="col-num">Visits</th><th>Usual service</th><th>Usual team member</th><th>Tags</th></tr>
+                </thead>
+                <tbody>
+                  {filtered.map(c => (
+                    <tr key={c.id} className="is-clickable" onClick={() => go('client', c.id)}>
+                      <td>
+                        <button className="link-name" onClick={e => { e.stopPropagation(); go('client', c.id); }}>{c.name}</button>
+                        <div className="cell-sub num">{fmtPhone(c.phone) || '-'}</div>
+                      </td>
+                      <td className="nowrap">{c.last_visit ? fmtDate(c.last_visit) : <span className="muted">-</span>}</td>
+                      <td className="col-num">{c.visit_count || 0}</td>
+                      <td>{c.preferred_service || <span className="muted">-</span>}</td>
+                      <td>{c.preferred_barber || <span className="muted">-</span>}</td>
+                      <td>
+                        <div className="row" style={{ gap: 4 }}>
+                          {(c.tags || []).length ? c.tags.map(t => <span key={t} className="badge badge--blue">{t}</span>) : <span className="muted">-</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="table-foot">Showing {filtered.length} of {clients.length} client{clients.length === 1 ? '' : 's'}</div>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ClientProfilePage({ clientId, setClients, go }) {
+  const toast = useToast();
+  const [client, setClient] = useState(null);
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({ name: '', notes: '', tags: '' });
+  const [saving, setSaving] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState('');
+  const onDepositAction = useDepositAction(setBookings);
+
+  useEffect(() => {
+    if (!clientId) { go('clients'); return; }
+    setLoading(true);
+    api(`/api/clients/${clientId}`)
+      .then(d => {
+        if (!d.client) { go('clients'); return; }
+        setClient(d.client);
+        setBookings(d.bookings || []);
+        setForm({ name: d.client.name, notes: d.client.notes || '', tags: (d.client.tags || []).join(', ') });
+      })
+      .catch(() => go('clients'))
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  async function handleSave(e) {
+    e.preventDefault();
+    setSaving(true); setError('');
+    try {
+      const d = await api(`/api/clients/${clientId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name: form.name.trim(), notes: form.notes || null, tags: parseTags(form.tags) }),
+      });
+      setClient(d.client);
+      setClients(prev => prev.map(c => c.id === clientId ? { ...c, ...d.client } : c));
+      setEditing(false);
+      toast('Client updated');
+    } catch (err) { setError(err.message); }
+    finally { setSaving(false); }
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await api(`/api/clients/${clientId}`, { method: 'DELETE' });
+      setClients(prev => prev.filter(c => c.id !== clientId));
+      toast(`${client.name} deleted`);
+      go('clients');
+    } catch (err) {
+      toast(err.message, 'error');
+      setDeleting(false);
+      setConfirmDel(false);
+    }
+  }
+
+  if (loading) return <Spinner />;
+  if (!client) return null;
+
+  const stats = [
+    { label: 'Visits', value: client.visit_count ?? 0 },
+    { label: 'Last visit', value: client.last_visit ? fmtDate(client.last_visit) : '-' },
+    { label: 'Usual service', value: client.preferred_service || '-' },
+    { label: 'Usual team member', value: client.preferred_barber || '-' },
+  ];
+
+  return (
+    <div className="page-content page-narrow" style={{ maxWidth: 1040 }}>
+      <button className="btn btn--ghost back-link" onClick={() => go('clients')}><Icon name="back" />All clients</button>
+
+      {editing ? (
+        <form onSubmit={handleSave}>
+          <Card title="Edit client"
+            footer={<>
+              {error && <span className="status status--error">{error}</span>}
+              <button type="button" className="btn btn--secondary" onClick={() => { setEditing(false); setError(''); }}>Cancel</button>
+              <button type="submit" className="btn btn--primary" disabled={saving}>{saving ? 'Saving…' : 'Save client'}</button>
+            </>}>
+            <div className="form-grid">
+              <Field label="Name" htmlFor="e-name">
+                <input id="e-name" className="input" required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+              </Field>
+              <Field label="Phone" hint="Phone numbers can't be changed.">
+                <input className="input" value={fmtPhone(client.phone)} disabled />
+              </Field>
+              <Field label="Tags" optional htmlFor="e-tags" hint="Separate with commas" className="span-2">
+                <input id="e-tags" className="input" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} />
+              </Field>
+              <Field label="Notes" optional htmlFor="e-notes" className="span-2">
+                <textarea id="e-notes" className="textarea" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+              </Field>
+            </div>
+          </Card>
+        </form>
+      ) : (
+        <section className="card">
+          <div className="card-body stack">
+            <div className="profile-head">
+              <div className="avatar" aria-hidden="true">{initials(client.name)}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h2 className="profile-name">{client.name}</h2>
+                <div className="muted num">{fmtPhone(client.phone)}</div>
+                {(client.tags || []).length > 0 && (
+                  <div className="tag-list">{client.tags.map(t => <span key={t} className="badge badge--blue">{t}</span>)}</div>
+                )}
+              </div>
+              <div className="row">
+                <button className="btn btn--secondary" onClick={() => setEditing(true)}><Icon name="edit" />Edit</button>
+                <button className="btn btn--danger-outline" onClick={() => setConfirmDel(true)}><Icon name="trash" />Delete</button>
+              </div>
+            </div>
+            <div className="mini-stats">
+              {stats.map(s => (
+                <div key={s.label} className="mini-stat">
+                  <div className="mini-stat-label">{s.label}</div>
+                  <div className="mini-stat-value">{s.value}</div>
+                </div>
+              ))}
+            </div>
+            {client.notes && <div className="note-box">{client.notes}</div>}
+          </div>
+        </section>
+      )}
+
+      <Card title="Booking history" flush>
+        <BookingsTable bookings={bookings} showCustomer={false} onDepositAction={onDepositAction}
+          emptyTitle="No bookings yet" emptySub="This client's appointments will show up here." />
+      </Card>
+
+      {confirmDel && (
+        <ConfirmDialog title={`Delete ${client.name}?`} confirmLabel="Delete client" busy={deleting}
+          onCancel={() => setConfirmDel(false)} onConfirm={handleDelete}>
+          The client record will be removed. Their past bookings stay in your booking history.
+        </ConfirmDialog>
+      )}
+    </div>
+  );
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+const DEFAULT_HOURS = { open: '09:00', close: '18:00', closed: false };
+
+const TIMEZONES = [
+  ['America/Toronto', 'Eastern Time (Toronto)'],
+  ['America/Halifax', 'Atlantic Time (Halifax)'],
+  ['America/St_Johns', 'Newfoundland Time (St. John\'s)'],
+  ['America/Winnipeg', 'Central Time (Winnipeg)'],
+  ['America/Regina', 'Saskatchewan (Regina)'],
+  ['America/Edmonton', 'Mountain Time (Calgary)'],
+  ['America/Vancouver', 'Pacific Time (Vancouver)'],
+];
+
+const SETTINGS_TABS = [
+  { id: 'business', label: 'Business' },
+  { id: 'hours',    label: 'Hours' },
+  { id: 'services', label: 'Services' },
+  { id: 'team',     label: 'Team' },
+  { id: 'booking',  label: 'Booking page' },
+  { id: 'deposits', label: 'Deposits' },
+  { id: 'walkins',  label: 'Walk-ins' },
+  { id: 'account',  label: 'Account' },
+];
+
+function SettingsPage({ tab, go, onBusinessUpdated }) {
+  const [business, setBusiness] = useState(null);
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const current = SETTINGS_TABS.some(t => t.id === tab) ? tab : 'business';
+
+  useEffect(() => {
+    Promise.all([api('/api/business'), api('/api/services')])
+      .then(([b, s]) => {
+        setBusiness(b.business || b);
+        setServices(s.services || []);
+      })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const patchBusiness = useCallback(patch => {
+    setBusiness(b => ({ ...b, ...patch }));
+    onBusinessUpdated && onBusinessUpdated(patch);
+  }, [onBusinessUpdated]);
+
+  return (
+    <div className="page-content page-narrow">
+      <nav className="tabs" role="tablist" aria-label="Settings sections">
+        {SETTINGS_TABS.map(t => (
+          <button key={t.id} role="tab" aria-selected={current === t.id} className={`tab ${current === t.id ? 'active' : ''}`}
+            onClick={() => go('settings', t.id)}>
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      {loading ? <Spinner /> : error ? <Notice type="error">{error}</Notice> : (
+        <div className="stack" key={current}>
+          {current === 'business' && <BusinessSettings business={business} onSaved={patchBusiness} />}
+          {current === 'hours'    && <HoursSettings business={business} onSaved={patchBusiness} />}
+          {current === 'services' && <ServicesSettings services={services} setServices={setServices} />}
+          {current === 'team'     && <TeamSettings business={business} onSaved={patchBusiness} go={go} />}
+          {current === 'booking'  && <BookingPageSettings business={business} onSaved={patchBusiness} go={go} />}
+          {current === 'deposits' && <DepositSettings business={business} onSaved={patchBusiness} />}
+          {current === 'walkins'  && <WalkInSettings business={business} onSaved={patchBusiness} />}
+          {current === 'account'  && <AccountSettings business={business} onSaved={patchBusiness} go={go} />}
         </div>
       )}
     </div>
   );
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
-function App() {
-  const [authed, setAuthed]     = useState(false);
-  const [page, setPage]         = useState('home');
-  const [business, setBusiness] = useState(null);
-  const [clients, setClients]   = useState([]);
+function CopyButton({ text, label = 'Copy', className = 'btn btn--secondary btn--sm' }) {
+  const toast = useToast();
+  return (
+    <button className={className} onClick={async () => {
+      try { await navigator.clipboard.writeText(text); toast('Copied'); }
+      catch { toast('Could not copy. Select the text and copy it instead.', 'error'); }
+    }}>
+      <Icon name="copy" />{label}
+    </button>
+  );
+}
+
+function BusinessSettings({ business, onSaved }) {
+  const [form, setForm] = useState({
+    name: business.name || '',
+    phone: business.phone || '',
+    address: business.address || '',
+    ai_name: business.ai_name || '',
+    timezone: business.timezone || 'America/Toronto',
+  });
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useStatus();
+  const [dirty, markSaved] = useDirty(form);
+  const set = key => e => setForm(f => ({ ...f, [key]: e.target.value }));
+
+  const save = async () => {
+    if (!form.name.trim()) { setStatus('error', 'Business name is required.'); return; }
+    setSaving(true); setStatus(null);
+    try {
+      await api('/api/business', { method: 'PUT', body: JSON.stringify(form) });
+      markSaved(form);
+      onSaved(form);
+      setStatus('success', 'Saved');
+    } catch (err) {
+      setStatus('error', err.message);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <>
+      {business.twilio_phone && (
+        <Card title="Your Bimbly line" description="Forward your shop's phone to this number and your AI receptionist answers every call.">
+          <div className="link-box">
+            <span className="link-box-url num" style={{ fontSize: 20 }}>{fmtPhone(business.twilio_phone)}</span>
+            <CopyButton text={business.twilio_phone} />
+          </div>
+        </Card>
+      )}
+      <Card title="Business details" description="Your AI receptionist uses these details when it talks to callers."
+        footer={<SaveFooter saving={saving} status={status} dirty={dirty} onSave={save} />}>
+        <div className="form-grid">
+          <Field label="Business name" htmlFor="b-name">
+            <input id="b-name" className="input" value={form.name} onChange={set('name')} />
+          </Field>
+          <Field label="Shop phone number" htmlFor="b-phone" hint="The number customers already call.">
+            <input id="b-phone" className="input" type="tel" value={form.phone} onChange={set('phone')} />
+          </Field>
+          <Field label="Address" htmlFor="b-address" className="span-2" hint="Shared with callers who ask where you are.">
+            <input id="b-address" className="input" value={form.address} onChange={set('address')} autoComplete="street-address" />
+          </Field>
+          <Field label="Receptionist name" htmlFor="b-ai" hint="The name it introduces itself with on calls.">
+            <input id="b-ai" className="input" value={form.ai_name} onChange={set('ai_name')} placeholder="e.g. Alex" />
+          </Field>
+          <Field label="Time zone" htmlFor="b-tz" hint="Used for booking times and reminders.">
+            <select id="b-tz" className="select" value={form.timezone} onChange={set('timezone')}>
+              {!TIMEZONES.some(([v]) => v === form.timezone) && <option value={form.timezone}>{form.timezone}</option>}
+              {TIMEZONES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </Field>
+        </div>
+      </Card>
+    </>
+  );
+}
+
+function HoursSettings({ business, onSaved }) {
+  const [hours, setHours] = useState(() => {
+    const h = {};
+    DAYS.forEach(d => { h[d] = { ...DEFAULT_HOURS, ...(business.business_hours?.[d] || {}) }; });
+    return h;
+  });
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useStatus();
+  const [dirty, markSaved] = useDirty(hours);
+
+  const update = (day, field, value) => setHours(h => ({ ...h, [day]: { ...h[day], [field]: value } }));
+
+  const copyMonday = () => setHours(h => {
+    const next = { ...h };
+    DAYS.forEach(d => { if (d !== 'monday') next[d] = { ...h.monday }; });
+    return next;
+  });
+
+  const save = async () => {
+    const bad = DAYS.find(d => !hours[d].closed && hours[d].open >= hours[d].close);
+    if (bad) { setStatus('error', `${capitalize(bad)}: closing time must be after opening time.`); return; }
+    setSaving(true); setStatus(null);
+    try {
+      await api('/api/business', { method: 'PUT', body: JSON.stringify({ business_hours: hours }) });
+      markSaved(hours);
+      onSaved({ business_hours: hours });
+      setStatus('success', 'Hours saved');
+    } catch (err) {
+      setStatus('error', err.message);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Card title="Opening hours" description="Your AI receptionist only books appointments when you're open."
+      action={<button className="btn btn--secondary btn--sm" onClick={copyMonday}><Icon name="copy" />Copy Monday to all days</button>}
+      flush footer={<SaveFooter saving={saving} status={status} dirty={dirty} onSave={save} label="Save hours" />}>
+      <div className="list-rows">
+        {DAYS.map(day => {
+          const h = hours[day];
+          return (
+            <div key={day} className="list-row hours-grid-row">
+              <label className="day-name" htmlFor={`open-${day}`}>{capitalize(day)}</label>
+              <Switch id={`open-${day}`} label={`Open on ${capitalize(day)}`} checked={!h.closed} onChange={v => update(day, 'closed', !v)} />
+              {h.closed ? (
+                <span className="hours-closed">Closed</span>
+              ) : (
+                <div className="hours-times">
+                  <input type="time" className="input" aria-label={`${capitalize(day)} opening time`} value={h.open} onChange={e => update(day, 'open', e.target.value)} />
+                  <span className="muted">to</span>
+                  <input type="time" className="input" aria-label={`${capitalize(day)} closing time`} value={h.close} onChange={e => update(day, 'close', e.target.value)} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function ServicesSettings({ services, setServices }) {
+  const toast = useToast();
+  const blank = { name: '', price: '', duration_minutes: '30' };
+  const [draft, setDraft] = useState(blank);
+  const [adding, setAdding] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [edit, setEdit] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [toDelete, setToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const clean = s => ({
+    name: s.name.trim(),
+    price: s.price === '' ? null : Number(s.price),
+    duration_minutes: s.duration_minutes === '' ? null : parseInt(s.duration_minutes, 10),
+  });
+
+  const add = async e => {
+    e.preventDefault();
+    if (!draft.name.trim()) return;
+    setAdding(true);
+    try {
+      const d = await api('/api/services', { method: 'POST', body: JSON.stringify(clean(draft)) });
+      setServices(s => [...s, d.service]);
+      setDraft(blank);
+      toast(`${d.service.name} added`);
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setAdding(false); }
+  };
+
+  const saveEdit = async () => {
+    if (!edit.name.trim()) { toast('Service name is required.', 'error'); return; }
+    setSavingEdit(true);
+    try {
+      const d = await api(`/api/services/${editId}`, { method: 'PUT', body: JSON.stringify(clean(edit)) });
+      setServices(s => s.map(x => x.id === editId ? d.service : x));
+      setEditId(null);
+      toast('Service updated');
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setSavingEdit(false); }
+  };
+
+  const remove = async () => {
+    setDeleting(true);
+    try {
+      await api(`/api/services/${toDelete.id}`, { method: 'DELETE' });
+      setServices(s => s.filter(x => x.id !== toDelete.id));
+      toast(`${toDelete.name} removed`);
+      setToDelete(null);
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setDeleting(false); }
+  };
+
+  const PriceInput = ({ value, onChange, id }) => (
+    <div className="input-group">
+      <span className="input-addon">$</span>
+      <input id={id} className="input" type="number" min="0" step="1" inputMode="decimal" aria-label="Price" value={value} onChange={onChange} />
+    </div>
+  );
+  const DurationInput = ({ value, onChange }) => (
+    <div className="input-group input-group--suffix">
+      <input className="input" type="number" min="5" step="5" inputMode="numeric" aria-label="Duration in minutes" value={value} onChange={onChange} />
+      <span className="input-addon">min</span>
+    </div>
+  );
+
+  return (
+    <Card title="Services" description="What customers can book. Your AI receptionist quotes these prices and uses the length to fit appointments in. Changes save right away." flush>
+      <div className="list-rows">
+        <div className="list-row list-head svc-grid"><span>Service</span><span>Price</span><span>Length</span><span></span></div>
+        {services.length === 0 && <div className="list-empty">No services yet. Add your first one below.</div>}
+        {services.map(s => editId === s.id ? (
+          <div key={s.id} className="list-row svc-grid">
+            <input className="input svc-name" aria-label="Service name" value={edit.name} onChange={e => setEdit(x => ({ ...x, name: e.target.value }))} autoFocus />
+            {PriceInput({ value: edit.price, onChange: e => setEdit(x => ({ ...x, price: e.target.value })) })}
+            {DurationInput({ value: edit.duration_minutes, onChange: e => setEdit(x => ({ ...x, duration_minutes: e.target.value })) })}
+            <div className="list-actions">
+              <button className="btn btn--primary btn--sm" onClick={saveEdit} disabled={savingEdit}>{savingEdit ? '…' : 'Save'}</button>
+              <button className="btn btn--ghost btn--sm btn--icon" aria-label="Cancel editing" onClick={() => setEditId(null)}><Icon name="x" /></button>
+            </div>
+          </div>
+        ) : (
+          <div key={s.id} className="list-row svc-grid">
+            <div className="svc-name">
+              <div className="cell-name">{s.name}</div>
+              {s.description && <div className="cell-sub">{s.description}</div>}
+            </div>
+            <span className="num">{s.price != null && s.price !== '' ? fmtMoney(s.price, Number(s.price) % 1 ? 2 : 0) : <span className="muted">-</span>}</span>
+            <span className="num">{s.duration_minutes ? `${s.duration_minutes} min` : <span className="muted">-</span>}</span>
+            <div className="list-actions">
+              <button className="btn btn--ghost btn--sm btn--icon" title="Edit" aria-label={`Edit ${s.name}`}
+                onClick={() => { setEditId(s.id); setEdit({ name: s.name || '', price: s.price ?? '', duration_minutes: s.duration_minutes ?? '' }); }}>
+                <Icon name="edit" />
+              </button>
+              <button className="btn btn--ghost btn--sm btn--icon" title="Remove" aria-label={`Remove ${s.name}`} onClick={() => setToDelete(s)}>
+                <Icon name="trash" />
+              </button>
+            </div>
+          </div>
+        ))}
+        <form className="list-row list-row--add svc-grid" onSubmit={add}>
+          <input className="input svc-name" placeholder="New service, e.g. Skin fade" aria-label="New service name" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} />
+          {PriceInput({ value: draft.price, onChange: e => setDraft(d => ({ ...d, price: e.target.value })) })}
+          {DurationInput({ value: draft.duration_minutes, onChange: e => setDraft(d => ({ ...d, duration_minutes: e.target.value })) })}
+          <div className="list-actions">
+            <button type="submit" className="btn btn--primary btn--sm" disabled={adding || !draft.name.trim()}><Icon name="plus" />{adding ? 'Adding…' : 'Add'}</button>
+          </div>
+        </form>
+      </div>
+      {toDelete && (
+        <ConfirmDialog title={`Remove ${toDelete.name}?`} confirmLabel="Remove service" busy={deleting}
+          onCancel={() => setToDelete(null)} onConfirm={remove}>
+          Customers won't be able to book this service anymore. Existing bookings aren't affected.
+        </ConfirmDialog>
+      )}
+    </Card>
+  );
+}
+
+function TeamSettings({ business, onSaved, go }) {
+  const words = teamWords(business.business_type);
+  const plan = business.plan || 'solo';
+  const max = teamLimit(plan);
+  const [team, setTeam] = useState(() => normalizeTeam(business.team_members || business.barbers));
+  const [newName, setNewName] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useStatus();
+  const [dirty, markSaved] = useDirty(team);
+  const atLimit = team.length >= max;
+
+  const update = (i, field, value) => setTeam(t => t.map((m, j) => j === i ? { ...m, [field]: value } : m));
+  const add = e => {
+    e.preventDefault();
+    const name = newName.trim();
+    if (!name || atLimit) return;
+    setTeam(t => [...t, { name, role: '', calendarId: '' }]);
+    setNewName('');
+  };
+
+  const save = async () => {
+    setSaving(true); setStatus(null);
+    try {
+      await api('/api/business', { method: 'PUT', body: JSON.stringify({ team_members: team }) });
+      markSaved(team);
+      onSaved({ team_members: team, barbers: team });
+      setStatus('success', 'Team saved');
+    } catch (err) {
+      setStatus('error', err.message);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Card title="Team" description={`Callers can ask for a specific ${words.one} by name. Add a Google Calendar to book straight into someone's calendar.`}
+      flush footer={<SaveFooter saving={saving} status={status} dirty={dirty} onSave={save} label="Save team" />}>
+      <div className="list-rows">
+        <div className="list-row list-head team-grid"><span>Name</span><span>Role</span><span>Google Calendar</span><span></span></div>
+        {team.length === 0 && <div className="list-empty">No {words.many} added yet.</div>}
+        {team.map((m, i) => (
+          <div key={i} className="list-row team-grid">
+            <div className="row" style={{ gap: 8, flexWrap: 'nowrap', minWidth: 0 }}>
+              <span className="avatar" style={{ width: 30, height: 30, fontSize: 12 }} aria-hidden="true">{initials(m.name)}</span>
+              <span className="cell-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</span>
+              {i === 0 && <span className="badge badge--blue">You</span>}
+            </div>
+            <select className="select" aria-label={`Role for ${m.name}`} value={m.role || ''} onChange={e => update(i, 'role', e.target.value)}>
+              <option value="">No role</option>
+              {[...new Set([...words.roles, m.role].filter(Boolean))].map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+            <input className="input team-cal" type="email" placeholder="name@gmail.com (optional)" aria-label={`Google Calendar for ${m.name}`}
+              value={m.calendarId || ''} onChange={e => update(i, 'calendarId', e.target.value)} />
+            <div className="list-actions">
+              {i !== 0 && (
+                <button className="btn btn--ghost btn--sm btn--icon" title="Remove" aria-label={`Remove ${m.name}`} onClick={() => setTeam(t => t.filter((_, j) => j !== i))}>
+                  <Icon name="trash" />
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {atLimit ? (
+          plan !== 'pro' && (
+            <div className="list-row list-row--add" style={{ display: 'block' }}>
+              <Notice>
+                Your {PLAN_LABELS[plan]} plan includes {max} {max === 1 ? words.one : words.many}.{' '}
+                <button className="btn-link" onClick={() => go('billing')}>Upgrade to {plan === 'solo' ? 'Starter' : 'Pro'}</button> to add more.
+              </Notice>
+            </div>
+          )
+        ) : (
+          <form className="list-row list-row--add team-grid" onSubmit={add}>
+            <input className="input team-add-name" placeholder={`Add a ${words.one} by name`} aria-label={`New ${words.one} name`} value={newName} onChange={e => setNewName(e.target.value)} />
+            <span></span>
+            <div className="list-actions">
+              <button type="submit" className="btn btn--secondary btn--sm" disabled={!newName.trim()}><Icon name="plus" />Add</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function BookingPageSettings({ business, onSaved, go }) {
+  const toast = useToast();
+  const [slug, setSlug] = useState(business.booking_slug || '');
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useStatus();
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef(null);
+  const plan = business.plan || 'solo';
+  const url = business.booking_slug ? `${window.location.origin}/book/${business.booking_slug}` : '';
+  const prefix = `${window.location.host}/book/`;
+
+  const saveSlug = async () => {
+    const value = slug.trim().toLowerCase();
+    if (!/^[a-z0-9-]+$/.test(value)) { setStatus('error', 'Use lowercase letters, numbers and hyphens only.'); return; }
+    setSaving(true); setStatus(null);
+    try {
+      const d = await api('/api/business/slug', { method: 'PUT', body: JSON.stringify({ slug: value }) });
+      setSlug(d.business.booking_slug);
+      onSaved({ booking_slug: d.business.booking_slug });
+      setStatus('success', 'Saved');
+    } catch (err) {
+      setStatus('error', err.message);
+    } finally { setSaving(false); }
+  };
+
+  const upload = async e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast('That file is over 2 MB. Try a smaller image.', 'error'); return; }
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('logo', file);
+      const d = await api('/api/business/logo', { method: 'POST', body: form });
+      onSaved({ logo_url: d.logo_url });
+      toast('Logo uploaded');
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setUploading(false); }
+  };
+
+  const removeLogo = async () => {
+    setUploading(true);
+    try {
+      await api('/api/business/logo', { method: 'DELETE' });
+      onSaved({ logo_url: null });
+      toast('Logo removed');
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setUploading(false); }
+  };
+
+  return (
+    <>
+      <Card title="Online booking page" description="Customers can book themselves at this link. Add it to your Instagram bio and Google listing."
+        footer={<SaveFooter saving={saving} status={status} dirty={slug !== (business.booking_slug || '')} onSave={saveSlug} label="Save address" disabled={!slug.trim()} />}>
+        <div className="stack">
+          {url ? (
+            <div className="link-box">
+              <span className="link-box-url">{url}</span>
+              <CopyButton text={url} label="Copy link" />
+              <a className="btn btn--secondary btn--sm" href={url} target="_blank" rel="noopener noreferrer"><Icon name="external" />Open</a>
+            </div>
+          ) : (
+            <Notice>Pick a page address below to turn on your booking page.</Notice>
+          )}
+          <Field label="Page address" htmlFor="slug" hint="Lowercase letters, numbers and hyphens only.">
+            <div className="input-group">
+              <span className="input-addon">{prefix}</span>
+              <input id="slug" className="input" value={slug} placeholder="sams-barbershop"
+                onChange={e => setSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))} />
+            </div>
+          </Field>
+        </div>
+      </Card>
+
+      <Card title="Logo" description="Shown at the top of your booking page.">
+        {plan === 'solo' ? (
+          <Notice>
+            Logo upload is included with Starter and Pro. <button className="btn-link" onClick={() => go('billing')}>See plans</button>
+          </Notice>
+        ) : (
+          <div className="logo-row">
+            <div className="logo-preview">
+              {business.logo_url ? <img src={business.logo_url} alt="Your logo" /> : 'No logo yet'}
+            </div>
+            <div className="stack" style={{ gap: 10 }}>
+              <div className="row">
+                <input ref={fileRef} type="file" accept="image/png,image/jpeg" className="sr-only" onChange={upload} tabIndex={-1} />
+                <button className="btn btn--secondary" onClick={() => fileRef.current.click()} disabled={uploading}>
+                  <Icon name="upload" />{uploading ? 'Working…' : business.logo_url ? 'Replace logo' : 'Upload logo'}
+                </button>
+                {business.logo_url && (
+                  <button className="btn btn--danger-outline" onClick={removeLogo} disabled={uploading}><Icon name="trash" />Remove</button>
+                )}
+              </div>
+              <p className="field-hint">PNG or JPG, up to 2 MB.</p>
+            </div>
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
+function DepositSettings({ business, onSaved }) {
+  const [form, setForm] = useState({
+    enabled: !!business.deposit_enabled,
+    amount: business.deposit_amount != null ? String(business.deposit_amount / 100) : '25',
+  });
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useStatus();
+  const [dirty, markSaved] = useDirty(form);
+
+  const save = async () => {
+    const dollars = parseFloat(form.amount);
+    if (form.enabled && !(dollars >= 1)) { setStatus('error', 'Enter a deposit of at least $1.'); return; }
+    setSaving(true); setStatus(null);
+    const cents = Math.round((dollars || 0) * 100);
+    try {
+      await api('/api/business', { method: 'PUT', body: JSON.stringify({ deposit_enabled: form.enabled, deposit_amount: cents }) });
+      markSaved(form);
+      onSaved({ deposit_enabled: form.enabled, deposit_amount: cents });
+      setStatus('success', 'Saved');
+    } catch (err) {
+      setStatus('error', err.message);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Card title="No-show deposits" description="Hold a card deposit when someone books. If they don't show, you can charge it from the Bookings page."
+      footer={<SaveFooter saving={saving} status={status} dirty={dirty} onSave={save} />}>
+      <div className="stack">
+        <SwitchRow id="deposit-on" title="Require a deposit to book" description="Customers get a secure link by text to hold their spot."
+          checked={form.enabled} onChange={v => setForm(f => ({ ...f, enabled: v }))} />
+        {form.enabled && (
+          <Field label="Deposit amount" htmlFor="deposit-amt" hint="Charged only if the customer doesn't show up.">
+            <div className="input-group" style={{ maxWidth: 200 }}>
+              <span className="input-addon">CA$</span>
+              <input id="deposit-amt" className="input" type="number" min="1" step="1" inputMode="decimal" value={form.amount}
+                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+            </div>
+          </Field>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function WalkInSettings({ business, onSaved }) {
+  const [form, setForm] = useState({
+    enabled: !!business.queue_enabled,
+    timeout: String(business.queue_notify_timeout ?? 10),
+  });
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useStatus();
+  const [dirty, markSaved] = useDirty(form);
+  const [qrUrl, setQrUrl] = useState(null);
 
   useEffect(() => {
-    // Pick up token from URL (sent by OAuth callback)
-    const params   = new URLSearchParams(window.location.search);
+    if (!business.queue_enabled) return;
+    let url;
+    apiFetch('/api/queue/qr')
+      .then(r => r.ok ? r.blob() : Promise.reject())
+      .then(blob => { url = URL.createObjectURL(blob); setQrUrl(url); })
+      .catch(() => {});
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [business.queue_enabled]);
+
+  const save = async () => {
+    const timeout = parseInt(form.timeout, 10);
+    if (form.enabled && !(timeout >= 1 && timeout <= 60)) { setStatus('error', 'Enter a time between 1 and 60 minutes.'); return; }
+    setSaving(true); setStatus(null);
+    try {
+      const patch = { queue_enabled: form.enabled, queue_notify_timeout: timeout || 10 };
+      await api('/api/business', { method: 'PUT', body: JSON.stringify(patch) });
+      markSaved(form);
+      onSaved(patch);
+      setStatus('success', 'Saved');
+    } catch (err) {
+      setStatus('error', err.message);
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Card title="Walk-in queue" description="Walk-ins scan a QR code to join the line. Bimbly texts them when it's their turn."
+      footer={<SaveFooter saving={saving} status={status} dirty={dirty} onSave={save} />}>
+      <div className="stack">
+        <SwitchRow id="queue-on" title="Turn on walk-in check-in" description="Shows the line on your Walk-ins page."
+          checked={form.enabled} onChange={v => setForm(f => ({ ...f, enabled: v }))} />
+        {form.enabled && (
+          <>
+            <Field label="Hold their spot for" htmlFor="queue-timeout" hint="After we text them, they're marked as a no-show if they don't arrive in this time.">
+              <div className="input-group input-group--suffix" style={{ maxWidth: 200 }}>
+                <input id="queue-timeout" className="input" type="number" min="1" max="60" step="1" value={form.timeout}
+                  onChange={e => setForm(f => ({ ...f, timeout: e.target.value }))} />
+                <span className="input-addon">minutes</span>
+              </div>
+            </Field>
+            <Field label="Check-in QR code">
+              {business.queue_enabled ? (
+                <div className="qr-row">
+                  {qrUrl ? <img className="qr-img" src={qrUrl} alt="Walk-in check-in QR code" /> : <div className="qr-img" style={{ display: 'grid', placeItems: 'center' }}><div className="spinner"></div></div>}
+                  <div className="stack" style={{ gap: 10, maxWidth: 280 }}>
+                    <p className="muted">Print it and put it by the door or at the front desk.</p>
+                    {qrUrl && <a className="btn btn--secondary" href={qrUrl} download="bimbly-walk-in-qr.png" style={{ alignSelf: 'flex-start' }}><Icon name="download" />Download QR code</a>}
+                  </div>
+                </div>
+              ) : (
+                <p className="field-hint">Save to get your QR code.</p>
+              )}
+            </Field>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function AccountSettings({ business, onSaved, go }) {
+  const toast = useToast();
+  const [recording, setRecording] = useState(!!business.call_recording_enabled);
+  const [recSaving, setRecSaving] = useState(false);
+  const [exporting, setExporting] = useState('');
+  const plan = business.plan || 'solo';
+
+  const toggleRecording = async enabled => {
+    setRecording(enabled);
+    setRecSaving(true);
+    try {
+      await api('/api/business/recording', { method: 'PUT', body: JSON.stringify({ enabled }) });
+      onSaved({ call_recording_enabled: enabled });
+      toast(enabled ? 'Call recording turned on' : 'Call recording turned off');
+    } catch (err) {
+      setRecording(!enabled);
+      toast(err.message, 'error');
+    } finally { setRecSaving(false); }
+  };
+
+  const exportCsv = async kind => {
+    setExporting(kind);
+    try { await downloadFile(`/api/export/${kind}`, `${kind}.csv`); }
+    catch (err) { toast(err.message, 'error'); }
+    finally { setExporting(''); }
+  };
+
+  return (
+    <>
+      <Card title="Call recording" description="This setting saves as soon as you change it.">
+        <SwitchRow id="rec-on" title="Record calls" description="Recordings help you check how calls went. Callers are told the call may be recorded."
+          checked={recording} disabled={recSaving} onChange={toggleRecording} />
+      </Card>
+
+      <Card title="Export your data" description="Download a spreadsheet (CSV) of your bookings or clients.">
+        {plan === 'solo' ? (
+          <Notice>Exports are included with Starter and Pro. <button className="btn-link" onClick={() => go('billing')}>See plans</button></Notice>
+        ) : (
+          <div className="row">
+            <button className="btn btn--secondary" onClick={() => exportCsv('bookings')} disabled={!!exporting}>
+              <Icon name="download" />{exporting === 'bookings' ? 'Preparing…' : 'Export bookings'}
+            </button>
+            <button className="btn btn--secondary" onClick={() => exportCsv('clients')} disabled={!!exporting}>
+              <Icon name="download" />{exporting === 'clients' ? 'Preparing…' : 'Export clients'}
+            </button>
+          </div>
+        )}
+      </Card>
+
+      <ChangePasswordCard email={business.email} />
+    </>
+  );
+}
+
+function ChangePasswordCard({ email }) {
+  const [form, setForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useStatus();
+  const set = key => e => setForm(f => ({ ...f, [key]: e.target.value }));
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setStatus(null);
+    const p = form.newPassword;
+    const missing = [
+      p.length < 8 && 'at least 8 characters',
+      !/[A-Z]/.test(p) && 'a capital letter',
+      !/[0-9]/.test(p) && 'a number',
+      !/[^A-Za-z0-9\s]/.test(p) && 'a special character',
+    ].filter(Boolean);
+    if (missing.length) { setStatus('error', 'New password needs ' + missing.join(', ') + '.'); return; }
+    if (p !== form.confirmPassword) { setStatus('error', "The new passwords don't match."); return; }
+
+    setSaving(true);
+    try {
+      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify(form) });
+      setForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setStatus('success', 'Password updated');
+    } catch (err) {
+      setStatus('error', err.message);
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <Card title="Password" description={<>Signed in as <strong>{email}</strong>. If you signed up with Google, <a href="/auth/forgot-password-page">set a password first</a>.</>}
+        footer={<>
+          <SaveStatus status={status} />
+          <button type="submit" className="btn btn--primary" disabled={saving}>{saving ? 'Saving…' : 'Update password'}</button>
+        </>}>
+        <input type="email" autoComplete="username" value={email || ''} readOnly hidden />
+        <div className="form-grid">
+          <Field label="Current password" htmlFor="pw-current" className="span-2 half">
+            <input id="pw-current" className="input" type="password" required autoComplete="current-password" value={form.currentPassword} onChange={set('currentPassword')} />
+          </Field>
+          <Field label="New password" htmlFor="pw-new" hint="8+ characters, with a capital letter, a number and a symbol.">
+            <input id="pw-new" className="input" type="password" required autoComplete="new-password" value={form.newPassword} onChange={set('newPassword')} />
+          </Field>
+          <Field label="Confirm new password" htmlFor="pw-confirm">
+            <input id="pw-confirm" className="input" type="password" required autoComplete="new-password" value={form.confirmPassword} onChange={set('confirmPassword')} />
+          </Field>
+        </div>
+      </Card>
+    </form>
+  );
+}
+
+// ── Billing ───────────────────────────────────────────────────────────────────
+const STATUS_INFO = {
+  trial:      { tone: 'blue',  label: 'Free trial' },
+  trialing:   { tone: 'blue',  label: 'Free trial' },
+  active:     { tone: 'green', label: 'Active' },
+  cancelling: { tone: 'amber', label: 'Cancels at period end' },
+  cancelled:  { tone: '',      label: 'Cancelled' },
+  canceled:   { tone: '',      label: 'Cancelled' },
+  past_due:   { tone: 'red',   label: 'Payment due' },
+  pending:    { tone: '',      label: 'Pending' },
+};
+
+const UPGRADE_INFO = {
+  solo:    { to: 'starter', label: 'Starter', price: 99,  desc: 'For shops with a small team.' },
+  starter: { to: 'pro',     label: 'Pro',     price: 199, desc: 'For busy shops with a bigger team.' },
+};
+
+const UPGRADE_FEATURES = {
+  solo:    ['Walk-in waitlist management', 'No-show deposit collection', 'Full analytics dashboard', 'Up to 4 team members'],
+  starter: ['Unlimited team members', 'Priority support', 'Advanced multi-location analytics', 'Custom AI voice & persona'],
+};
+
+const PLAN_FEATURES = [
+  '24/7 AI receptionist answers every call',
+  'Text confirmations to your customers',
+  'Email notifications straight to you',
+  'Google Calendar sync',
+  'Online dashboard and analytics',
+  'Unlimited bookings',
+];
+
+function BillingPage({ business }) {
+  const toast = useToast();
+  const [billing, setBilling] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  useEffect(() => {
+    api('/api/billing')
+      .then(setBilling)
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const cancelSub = async () => {
+    setCancelling(true);
+    try {
+      await api('/api/billing/cancel', { method: 'POST' });
+      setBilling(b => ({ ...b, subscription_status: 'cancelling', cancel_at_period_end: true }));
+      setShowModal(false);
+      toast('Your subscription will end at the close of this billing period');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally { setCancelling(false); }
+  };
+
+  if (loading) return <Spinner />;
+
+  const plan = business?.plan || 'solo';
+  const status = billing?.cancel_at_period_end && billing?.subscription_status !== 'cancelled' ? 'cancelling' : (billing?.subscription_status || 'unknown');
+  const info = STATUS_INFO[status] || { tone: '', label: capitalize(status) };
+  const isTrial = status === 'trial' || status === 'trialing';
+  const amount = billing?.amount != null ? Number(billing.amount) : null;
+  const upgrade = UPGRADE_INFO[plan];
+  const longDate = unix => unix ? new Date(unix * 1000).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' }) : null;
+  const periodEnd = longDate(billing?.current_period_end);
+  const trialEnd = longDate(billing?.trial_end);
+
+  return (
+    <div className="page-content page-narrow" style={{ maxWidth: 1000 }}>
+      {error && <Notice type="error">{error}</Notice>}
+      {status === 'past_due' && <Notice type="error">Your last payment didn't go through. Update your card to keep your receptionist answering calls.</Notice>}
+
+      <div className="billing-grid">
+        <section className="card">
+          <div className="card-head">
+            <div>
+              <p className="muted small" style={{ fontWeight: 700 }}>Current plan</p>
+              <h2 className="plan-name">Bimbly {PLAN_LABELS[plan] || plan}</h2>
+            </div>
+            <span className={`badge ${info.tone ? 'badge--' + info.tone : ''}`}>{info.label}</span>
+          </div>
+          <div className="card-body">
+            <div className="plan-price">{amount != null ? `CA$${amount.toFixed(0)}` : '-'}<span> / month{isTrial ? ' after your trial' : ''}</span></div>
+            {isTrial && trialEnd && <Notice>Your free trial ends <strong>{trialEnd}</strong>. Your card is charged after that.</Notice>}
+            {status === 'cancelling' && <Notice type="warn">Your subscription ends {periodEnd ? <strong>{periodEnd}</strong> : 'at the end of this billing period'}. Your receptionist answers calls until then.</Notice>}
+            {!isTrial && status !== 'cancelling' && periodEnd && (
+              <dl className="kv"><dt>Next payment</dt><dd>{periodEnd}</dd></dl>
+            )}
+            <ul className="check-list">
+              {PLAN_FEATURES.map(f => <li key={f}><Icon name="check" />{f}</li>)}
+            </ul>
+          </div>
+          {status !== 'cancelled' && status !== 'canceled' && status !== 'cancelling' && (
+            <div className="card-foot" style={{ justifyContent: 'flex-start' }}>
+              <button className="btn-link btn-link--muted small" onClick={() => setShowModal(true)}>Cancel subscription</button>
+            </div>
+          )}
+        </section>
+
+        {upgrade ? (
+          <section className="card card--upgrade">
+            <div className="card-head" style={{ borderBottomColor: 'transparent' }}>
+              <div>
+                <p className="small" style={{ fontWeight: 700, color: 'var(--ink-deep)' }}>Upgrade</p>
+                <h2 className="plan-name">Bimbly {upgrade.label}</h2>
+                <p className="card-desc">{upgrade.desc}</p>
+              </div>
+            </div>
+            <div className="card-body">
+              <div className="plan-price">CA${upgrade.price}<span> / month</span></div>
+              <ul className="check-list">
+                {(UPGRADE_FEATURES[plan] || []).map(f => <li key={f}><Icon name="check" />{f}</li>)}
+              </ul>
+              <button className="btn btn--primary btn--block" style={{ marginTop: 'auto' }}
+                onClick={() => { window.location.href = `/billing/checkout?businessId=${business?.id}&plan=${upgrade.to}`; }}>
+                Upgrade to {upgrade.label}<Icon name="arrow" />
+              </button>
+            </div>
+          </section>
+        ) : (
+          <section className="card card--upgrade">
+            <div className="card-body" style={{ justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
+              <div className="empty-icon" style={{ margin: 0 }}><Icon name="sparkle" /></div>
+              <h2 className="plan-name">You're on our top plan</h2>
+              <p className="muted">Thanks for being a Pro member. Questions? Email <a href="mailto:hello@bimblyai.com">hello@bimblyai.com</a>.</p>
+            </div>
+          </section>
+        )}
+      </div>
+
+      {showModal && (
+        <ConfirmDialog title="Cancel your subscription?" confirmLabel="Yes, cancel" cancelLabel="Keep my plan" busy={cancelling}
+          onCancel={() => setShowModal(false)} onConfirm={cancelSub}>
+          Your service continues until <strong>{periodEnd || trialEnd || 'the end of the billing period'}</strong>. After that, your AI receptionist stops answering calls.
+        </ConfirmDialog>
+      )}
+    </div>
+  );
+}
+
+// ── Onboarding ────────────────────────────────────────────────────────────────
+const SERVICE_DEFAULTS = {
+  'Barbershop': [
+    { name: "Men's Haircut", price: '35', duration_minutes: '30' },
+    { name: 'Beard Trim',    price: '20', duration_minutes: '20' },
+    { name: "Kid's Haircut", price: '25', duration_minutes: '20' },
+    { name: 'Shape Up',      price: '25', duration_minutes: '20' },
+  ],
+  'Hair Salon': [
+    { name: 'Haircut',    price: '55',  duration_minutes: '45' },
+    { name: 'Blowout',    price: '45',  duration_minutes: '45' },
+    { name: 'Colour',     price: '120', duration_minutes: '120' },
+    { name: 'Highlights', price: '150', duration_minutes: '150' },
+  ],
+  'Nail Salon': [
+    { name: 'Manicure',         price: '35', duration_minutes: '30' },
+    { name: 'Pedicure',         price: '45', duration_minutes: '45' },
+    { name: 'Gel Manicure',     price: '50', duration_minutes: '45' },
+    { name: 'Acrylic Full Set', price: '65', duration_minutes: '60' },
+  ],
+};
+
+const BIZ_TYPE_MAP = { 'barbershop': 'Barbershop', 'hair-salon': 'Hair Salon', 'hair salon': 'Hair Salon', 'nail-salon': 'Nail Salon', 'nail salon': 'Nail Salon' };
+
+function OnboardingPage({ go }) {
+  const [step, setStep] = useState(1);
+  const [saving, setSaving] = useState(false);
+  const [newBarber, setNewBarber] = useState('');
+  const [bizPhone, setBizPhone] = useState(null);
+  const [stepError, setStepError] = useState('');
+  const [loadingData, setLoadingData] = useState(true);
+  const [plan, setPlan] = useState('solo');
+  const [data, setData] = useState({
+    name: '', phone: '', address: '', ai_name: '',
+    business_type: 'Barbershop', timezone: 'America/Toronto',
+    business_hours: {}, services: SERVICE_DEFAULTS['Barbershop'], barbers: [],
+  });
+
+  const setField = (key, val) => setData(d => ({ ...d, [key]: val }));
+  const steps = plan === 'solo' ? ['Business', 'Services', 'Go live'] : ['Business', 'Services', 'Team', 'Go live'];
+  const last = steps.length;
+  const stepName = steps[step - 1];
+
+  useEffect(() => {
+    Promise.all([api('/api/business'), api('/api/services')])
+      .then(([b, s]) => {
+        const biz = b.business || b;
+        const svcs = s.services || [];
+        const bizType = BIZ_TYPE_MAP[(biz.business_type || '').toLowerCase()] || biz.business_type || 'Barbershop';
+        setPlan(biz.plan || 'solo');
+        setBizPhone(biz.twilio_phone || null);
+        const team = normalizeTeam(biz.team_members || biz.barbers);
+        setData({
+          name: biz.name || '',
+          phone: biz.phone || '',
+          address: biz.address || '',
+          ai_name: biz.ai_name || '',
+          business_type: bizType,
+          timezone: biz.timezone || 'America/Toronto',
+          business_hours: biz.business_hours || {},
+          barbers: team.length ? team : (biz.owner_name ? [{ name: biz.owner_name, role: '', calendarId: '' }] : []),
+          services: svcs.length > 0
+            ? svcs.map(x => ({ name: x.name || '', price: x.price ?? '', duration_minutes: x.duration_minutes ?? '', description: x.description }))
+            : (SERVICE_DEFAULTS[bizType] || SERVICE_DEFAULTS['Barbershop']),
+        });
+      })
+      .catch(() => {})
+      .finally(() => setLoadingData(false));
+  }, []);
+
+  const changeType = type => setData(d => ({ ...d, business_type: type, services: SERVICE_DEFAULTS[type] || d.services }));
+
+  const updateSvc = (i, key, val) => setData(d => ({ ...d, services: d.services.map((s, j) => j === i ? { ...s, [key]: val } : s) }));
+  const removeSvc = i => setData(d => ({ ...d, services: d.services.filter((_, j) => j !== i) }));
+
+  const addBarber = e => {
+    e && e.preventDefault();
+    if (!newBarber.trim() || data.barbers.length >= teamLimit(plan)) return;
+    setData(d => ({ ...d, barbers: [...d.barbers, { name: newBarber.trim(), role: '', calendarId: '' }] }));
+    setNewBarber('');
+  };
+
+  const validate = n => {
+    if (steps[n - 1] === 'Business') {
+      if (!data.name.trim()) return 'Enter your business name.';
+      if (!data.phone.trim()) return 'Enter your shop phone number.';
+    }
+    if (steps[n - 1] === 'Services') {
+      if (data.services.length === 0) return 'Add at least one service.';
+      for (const svc of data.services) {
+        if (!String(svc.name).trim()) return 'Each service needs a name.';
+        if (svc.price === '' || svc.price == null) return `Add a price for ${svc.name}.`;
+      }
+    }
+    return '';
+  };
+
+  const complete = async () => {
+    setSaving(true);
+    setStepError('');
+    try {
+      await api('/api/business', {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: data.name, phone: data.phone, address: data.address, ai_name: data.ai_name,
+          business_type: data.business_type, timezone: data.timezone,
+          business_hours: data.business_hours, team_members: data.barbers,
+        }),
+      });
+      await api('/api/services/replace', { method: 'PUT', body: JSON.stringify({ services: data.services }) });
+      try {
+        await apiFetch('/onboarding/complete', {
+          method: 'POST',
+          body: JSON.stringify({ services: data.services, barbers: data.barbers, timezone: data.timezone, supported_languages: data.supported_languages }),
+        });
+      } catch (vapiErr) {
+        console.warn('Receptionist update failed (non-fatal):', vapiErr);
+      }
+      go('home');
+    } catch (err) {
+      setStepError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loadingData) return <Spinner />;
+
+  return (
+    <div className="onboarding-wrap">
+      <section className="card onboarding-card">
+        <div className="card-body">
+          <ol className="steps" aria-label="Setup progress" style={{ listStyle: 'none', padding: 0 }}>
+            {steps.map((label, i) => {
+              const n = i + 1;
+              return (
+                <React.Fragment key={label}>
+                  {i > 0 && <li className="step-line" aria-hidden="true"></li>}
+                  <li className={`step ${n === step ? 'active' : n < step ? 'done' : ''}`} aria-current={n === step ? 'step' : undefined}>
+                    <span className="step-dot">{n < step ? <Icon name="check" /> : n}</span>
+                    <span className="step-label">{label}</span>
+                  </li>
+                </React.Fragment>
+              );
+            })}
+          </ol>
+
+          {stepName === 'Business' && (
+            <>
+              <h2 className="step-title">Let's set up your receptionist</h2>
+              <p className="step-sub">Tell us about your shop so your AI receptionist can answer like it works there.</p>
+              <div className="form-grid">
+                <Field label="Business name" htmlFor="o-name" className="span-2">
+                  <input id="o-name" className="input" value={data.name} onChange={e => setField('name', e.target.value)} placeholder="Sam's Barbershop" />
+                </Field>
+                <Field label="Shop phone number" htmlFor="o-phone" className="span-2" hint="The number customers call now. You'll forward it to Bimbly in the last step.">
+                  <input id="o-phone" className="input" type="tel" value={data.phone} onChange={e => setField('phone', e.target.value)} placeholder="416 555 0123" />
+                </Field>
+                <Field label="Address" optional htmlFor="o-address" className="span-2">
+                  <input id="o-address" className="input" value={data.address} onChange={e => setField('address', e.target.value)} placeholder="123 Main St, Toronto, ON" />
+                </Field>
+                <Field label="Type of business" htmlFor="o-type">
+                  <select id="o-type" className="select" value={data.business_type} onChange={e => changeType(e.target.value)}>
+                    <option value="Barbershop">Barbershop</option>
+                    <option value="Hair Salon">Hair salon</option>
+                    <option value="Nail Salon">Nail salon</option>
+                  </select>
+                </Field>
+                <Field label="Receptionist name" optional htmlFor="o-ai">
+                  <input id="o-ai" className="input" value={data.ai_name} onChange={e => setField('ai_name', e.target.value)} placeholder="e.g. Alex" />
+                </Field>
+                <Field label="Time zone" htmlFor="o-tz" className="span-2">
+                  <select id="o-tz" className="select" value={data.timezone} onChange={e => setField('timezone', e.target.value)}>
+                    {!TIMEZONES.some(([v]) => v === data.timezone) && <option value={data.timezone}>{data.timezone}</option>}
+                    {TIMEZONES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </Field>
+              </div>
+            </>
+          )}
+
+          {stepName === 'Services' && (
+            <>
+              <h2 className="step-title">What do you offer?</h2>
+              <p className="step-sub">We filled in common services. Change the prices to match yours.</p>
+              <div className="stack" style={{ gap: 8 }}>
+                <div className="svc-edit-row svc-edit-head" aria-hidden="true"><span>Service</span><span>Price</span><span className="svc-dur">Length</span><span></span></div>
+                {data.services.map((svc, i) => (
+                  <div key={i} className="svc-edit-row">
+                    <input className="input" aria-label="Service name" placeholder="Service name" value={svc.name} onChange={e => updateSvc(i, 'name', e.target.value)} />
+                    <div className="input-group">
+                      <span className="input-addon">$</span>
+                      <input className="input" type="number" min="0" aria-label="Price" value={svc.price} onChange={e => updateSvc(i, 'price', e.target.value)} />
+                    </div>
+                    <div className="input-group input-group--suffix svc-dur">
+                      <input className="input" type="number" min="5" step="5" aria-label="Length in minutes" value={svc.duration_minutes} onChange={e => updateSvc(i, 'duration_minutes', e.target.value)} />
+                      <span className="input-addon">min</span>
+                    </div>
+                    <button className="btn btn--ghost btn--icon" aria-label={`Remove ${svc.name || 'service'}`} onClick={() => removeSvc(i)}><Icon name="trash" /></button>
+                  </div>
+                ))}
+                <button className="btn btn--secondary" style={{ alignSelf: 'flex-start', marginTop: 4 }}
+                  onClick={() => setData(d => ({ ...d, services: [...d.services, { name: '', price: '', duration_minutes: '30' }] }))}>
+                  <Icon name="plus" />Add a service
+                </button>
+              </div>
+            </>
+          )}
+
+          {stepName === 'Team' && (
+            <>
+              <h2 className="step-title">Who works with you?</h2>
+              <p className="step-sub">
+                Callers can ask for someone by name.
+                {plan === 'starter' && ' Your Starter plan includes up to 4 people.'}
+              </p>
+              <div className="chips" style={{ marginBottom: 16 }}>
+                {data.barbers.map((b, i) => (
+                  <span key={i} className={`chip ${i === 0 ? 'chip--fixed' : ''}`}>
+                    {b.name}{i === 0 && <span style={{ fontWeight: 400 }}>(you)</span>}
+                    {i > 0 && (
+                      <button className="chip-remove" aria-label={`Remove ${b.name}`} onClick={() => setData(d => ({ ...d, barbers: d.barbers.filter((_, j) => j !== i) }))}>
+                        <Icon name="x" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {data.barbers.length === 0 && <span className="muted">No one added yet.</span>}
+              </div>
+              {data.barbers.length < teamLimit(plan) ? (
+                <form className="row" style={{ flexWrap: 'nowrap' }} onSubmit={addBarber}>
+                  <input className="input" placeholder="Name" aria-label="Team member name" value={newBarber} onChange={e => setNewBarber(e.target.value)} />
+                  <button type="submit" className="btn btn--secondary" disabled={!newBarber.trim()}><Icon name="plus" />Add</button>
+                </form>
+              ) : (
+                <p className="field-hint">You've reached the limit for your plan.</p>
+              )}
+            </>
+          )}
+
+          {stepName === 'Go live' && (
+            <>
+              <h2 className="step-title">You're almost live</h2>
+              <p className="step-sub">Forward your shop's phone to your Bimbly number. From then on, every call gets answered.</p>
+              <div className="forward-box">
+                <div className="forward-label">Your Bimbly number</div>
+                <div className="forward-number">{bizPhone ? fmtPhone(bizPhone) : 'Being set up'}</div>
+              </div>
+              <div className="instructions" style={{ marginTop: 24 }}>
+                <div>
+                  <h3>iPhone</h3>
+                  <ol>
+                    <li>Open <strong>Settings → Phone → Call Forwarding</strong></li>
+                    <li>Turn on <strong>Call Forwarding</strong></li>
+                    <li>Enter your Bimbly number</li>
+                  </ol>
+                </div>
+                <div>
+                  <h3>Android</h3>
+                  <ol>
+                    <li>Open <strong>Phone → Settings → Calls</strong></li>
+                    <li>Tap <strong>Call forwarding → Always forward</strong></li>
+                    <li>Enter your Bimbly number</li>
+                  </ol>
+                </div>
+              </div>
+              <p className="field-hint" style={{ marginTop: 16 }}>Using a landline? Your phone company can turn on forwarding for you.</p>
+            </>
+          )}
+
+          {stepError && <div style={{ marginTop: 20 }}><Notice type="error">{stepError}</Notice></div>}
+
+          <div className="step-actions">
+            {step > 1 && <button className="btn btn--ghost" onClick={() => { setStepError(''); setStep(s => s - 1); }}><Icon name="back" />Back</button>}
+            {step < last ? (
+              <button className="btn btn--primary" onClick={() => {
+                const err = validate(step);
+                if (err) { setStepError(err); return; }
+                setStepError('');
+                setStep(s => s + 1);
+              }}>Continue<Icon name="arrow" /></button>
+            ) : (
+              <button className="btn btn--primary" onClick={complete} disabled={saving}>
+                {saving ? 'Finishing setup…' : "I've forwarded my number"}
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ── Routing (hash-based, so refresh and the back button work) ────────────────
+function parseHash() {
+  const parts = window.location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  return { page: parts[0] || 'home', sub: parts[1] ? decodeURIComponent(parts[1]) : null };
+}
+
+const TITLES = {
+  home: 'Dashboard',
+  bookings: 'Bookings',
+  queue: 'Walk-ins',
+  clients: 'Clients',
+  client: 'Client',
+  settings: 'Settings',
+  billing: 'Billing',
+  onboarding: 'Setup wizard',
+};
+
+// ── App ───────────────────────────────────────────────────────────────────────
+function App() {
+  const [authed, setAuthed] = useState(false);
+  const [route, setRoute] = useState(parseHash);
+  const [business, setBusiness] = useState(null);
+  const [clients, setClients] = useState([]);
+  const [queue, setQueue] = useState([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const go = useCallback((page, sub) => {
+    const hash = '#/' + page + (sub ? '/' + encodeURIComponent(sub) : '');
+    if (window.location.hash !== hash) window.location.hash = hash;
+    else setRoute(parseHash());
+    setMenuOpen(false);
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => { setRoute(parseHash()); setMenuOpen(false); window.scrollTo(0, 0); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
     const urlToken = params.get('token');
     if (urlToken) {
       localStorage.setItem('bimbly_token', urlToken);
@@ -2466,63 +2402,54 @@ function App() {
       url.searchParams.delete('token');
       window.history.replaceState({}, '', url);
     }
-
-    const token = localStorage.getItem('bimbly_token');
-    if (!token) {
-      window.location.href = API_BASE + '/auth/dashboard/google';
+    if (!localStorage.getItem('bimbly_token')) {
+      window.location.href = API_BASE + '/auth/dashboard/login';
       return;
     }
-
     setAuthed(true);
-
-    apiFetch('/api/business')
-      .then(r => r.json())
-      .then(data => setBusiness(data.business || data))
-      .catch(() => {});
-    apiFetch('/api/clients')
-      .then(r => r.json())
-      .then(d => setClients(d.clients || []))
-      .catch(() => {});
+    api('/api/business').then(d => setBusiness(d.business || d)).catch(() => {});
+    api('/api/clients').then(d => setClients(d.clients || [])).catch(() => {});
   }, []);
 
-  if (!authed) {
-    return (
-      <div className="loading-screen">
-        <div className="spinner"></div>
-      </div>
-    );
-  }
+  // Keep the walk-in count fresh for the sidebar badge and the home page.
+  useEffect(() => {
+    if (!authed) return;
+    const load = () => api('/api/queue').then(d => setQueue(d.queue || [])).catch(() => {});
+    load();
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [authed]);
 
-  const titles = {
-    home:           'Dashboard',
-    bookings:       'Bookings',
-    queue:          'Walk-in Queue',
-    clients:        'Clients',
-    'client-profile': 'Client Profile',
-    settings:       'Settings',
-    billing:        'Billing',
-    onboarding:     'Setup',
-  };
+  useEffect(() => {
+    document.title = `${TITLES[route.page] || 'Dashboard'} | Bimbly`;
+  }, [route.page]);
+
+  const onBusinessUpdated = useCallback(patch => setBusiness(b => ({ ...(b || {}), ...patch })), []);
+
+  if (!authed) return <div className="loading-screen"><div className="spinner"></div></div>;
+
+  const { page, sub } = route;
+  const known = TITLES[page] ? page : 'home';
 
   return (
     <div className="app-layout">
-      <Sidebar page={page} setPage={setPage} business={business} />
+      <Sidebar page={known} go={go} business={business} open={menuOpen} onClose={() => setMenuOpen(false)} queueCount={queue.length} />
       <div className="main-area">
-        <TopBar title={titles[page] || 'Dashboard'} />
-        <div className="content-area">
-          {page === 'home'       && <DashboardHome />}
-          {page === 'bookings'   && <BookingsPage clients={clients} setPage={setPage} />}
-          {page === 'queue'      && <QueuePage />}
-          {page === 'clients'    && <ClientsPage clients={clients} setClients={setClients} setPage={setPage} />}
-          {page === 'client-profile' && <ClientProfilePage clients={clients} setClients={setClients} setPage={setPage} />}
-          {page === 'settings'   && <SettingsPage setPage={setPage} />}
-          {page === 'billing'    && <BillingPage />}
-          {page === 'onboarding' && <OnboardingPage setPage={setPage} />}
-        </div>
+        <TopBar title={TITLES[known]} onMenu={() => setMenuOpen(true)} />
+        <main className="content-area" id="main">
+          {known === 'home'       && <DashboardHome business={business} go={go} queue={queue} />}
+          {known === 'bookings'   && <BookingsPage clients={clients} go={go} />}
+          {known === 'queue'      && <QueuePage business={business} go={go} onQueueChange={setQueue} />}
+          {known === 'clients'    && <ClientsPage clients={clients} setClients={setClients} go={go} initialSearch={sub} />}
+          {known === 'client'     && <ClientProfilePage key={sub} clientId={sub} setClients={setClients} go={go} />}
+          {known === 'settings'   && <SettingsPage tab={sub} go={go} onBusinessUpdated={onBusinessUpdated} />}
+          {known === 'billing'    && <BillingPage business={business} />}
+          {known === 'onboarding' && <OnboardingPage go={go} />}
+        </main>
       </div>
     </div>
   );
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+root.render(<ToastProvider><App /></ToastProvider>);

@@ -7,6 +7,7 @@ const QRCode = require('qrcode');
 const queueService = require('./queueService');
 const { rebuildAndPatchVapiPrompt } = require('./vapiService');
 const bcrypt = require('bcryptjs');
+const { DateTime } = require('luxon');
 const { passwordError } = require('./signupValidation');
 
 const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://bookingagent-gmo2.onrender.com';
@@ -156,18 +157,18 @@ router.get('/api/bookings', async (req, res) => {
 // GET /api/analytics — compute booking analytics for the authenticated business
 router.get('/api/analytics', async (req, res) => {
   try {
-    const today = new Date();
-    const startOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const startOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const eightWeeksAgo = new Date(today.getTime() - 8 * 7 * 24 * 60 * 60 * 1000);
-    const sevenDaysAhead = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    // "Today" means today in the shop's time zone, not on the server (UTC).
+    let now = DateTime.now().setZone(req.business.timezone || 'America/Toronto');
+    if (!now.isValid) now = DateTime.now().setZone('America/Toronto');
+    const todayStr = now.toISODate();
+    const thisMonthStr = now.startOf('month').toISODate();
+    const lastMonthStr = now.minus({ months: 1 }).startOf('month').toISODate();
+    const nextWeekStr = now.plus({ days: 7 }).toISODate();
+    const eightWeeksAgoStr = now.minus({ weeks: 8 }).toISODate();
 
-    const fetchFrom = startOfLastMonth.toISOString().split('T')[0];
-    const fetchTo = sevenDaysAhead.toISOString().split('T')[0];
-    const todayStr = today.toISOString().split('T')[0];
-    const thisMonthStr = startOfThisMonth.toISOString().split('T')[0];
-    const lastMonthStr = startOfLastMonth.toISOString().split('T')[0];
-    const nextWeekStr = sevenDaysAhead.toISOString().split('T')[0];
+    // Fetch from whichever is earlier: start of last month or 8 weeks ago (for the charts).
+    const fetchFrom = eightWeeksAgoStr < lastMonthStr ? eightWeeksAgoStr : lastMonthStr;
+    const fetchTo = nextWeekStr;
 
     // Fetch all bookings for the analysis window
     const { data: bookings, error } = await supabase
@@ -180,28 +181,34 @@ router.get('/api/analytics', async (req, res) => {
 
     if (error) throw error;
 
-    const PRICE_LOOKUP = {
-      "men's haircut": 35,
-      "beard trim": 20,
-      "men's haircut + beard trim": 50,
-      "kid's haircut": 25,
-      "men's haircut and beard trim": 50,
-      "haircut": 35,
-    };
+    // Price each booking from the shop's own service menu.
+    const { data: services } = await supabase
+      .from('services')
+      .select('name, price')
+      .eq('business_id', req.business.id);
+    const PRICE_LOOKUP = {};
+    (services || []).forEach(s => {
+      const price = Number(s.price);
+      if (s.name && Number.isFinite(price)) PRICE_LOOKUP[s.name.toLowerCase().trim()] = price;
+    });
+    const knownPrices = Object.values(PRICE_LOOKUP);
+    const fallbackPrice = knownPrices.length
+      ? Math.round(knownPrices.reduce((a, b) => a + b, 0) / knownPrices.length)
+      : 35;
 
     // Partition bookings
     const thisMonthBookings = bookings.filter(b => b.appointment_date >= thisMonthStr && b.appointment_date <= todayStr);
     const lastMonthBookings = bookings.filter(b => b.appointment_date >= lastMonthStr && b.appointment_date < thisMonthStr);
     const todayBookings = bookings.filter(b => b.appointment_date === todayStr);
     const upcomingBookings = bookings.filter(b => b.appointment_date > todayStr && b.appointment_date <= nextWeekStr);
-    const recentBookings = bookings.filter(b => b.appointment_date >= eightWeeksAgo.toISOString().split('T')[0] && b.appointment_date <= todayStr);
+    const recentBookings = bookings.filter(b => b.appointment_date >= eightWeeksAgoStr && b.appointment_date <= todayStr);
 
-    // Revenue estimate this month
+    // Revenue estimate this month: sum of each booked service's price
     const revenueEstimateThisMonth = thisMonthBookings.reduce((sum, b) => {
       const raw = b.service_ids;
-      const name = Array.isArray(raw) ? raw[0] : raw;
-      const price = PRICE_LOOKUP[(name || '').toLowerCase().trim()] ?? 35;
-      return sum + price;
+      const names = (Array.isArray(raw) ? raw : [raw]).filter(Boolean);
+      if (!names.length) return sum + fallbackPrice;
+      return sum + names.reduce((s, name) => s + (PRICE_LOOKUP[String(name).toLowerCase().trim()] ?? fallbackPrice), 0);
     }, 0);
 
     // Busiest days of week
