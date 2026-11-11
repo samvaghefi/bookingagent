@@ -2106,7 +2106,7 @@ function BillingPage({ business, onBusinessUpdated, go }) {
               {isTrial
                 ? <>Nothing is charged during your free trial. After {trialEnd || 'it ends'}, it's <strong>CA${t.price}/month</strong>.</>
                 : isUpgrade
-                  ? <>Your card is charged the difference for the rest of this billing period, then <strong>CA${t.price}/month</strong>.</>
+                  ? <>The difference for the rest of this billing period is added to your next bill. After that, it's <strong>CA${t.price}/month</strong>.</>
                   : <>The unused part of your current plan becomes a credit on your next bill. After that, it's <strong>CA${t.price}/month</strong>.</>}
             </p>
             {!isUpgrade && target === 'solo' && <p>Your logo on the booking page and data downloads are part of Starter and Pro.</p>}
