@@ -417,7 +417,7 @@ function Sidebar({ page, go, business, open, onClose, queueCount }) {
       {open && <div className="sidebar-scrim" onClick={onClose} aria-hidden="true"></div>}
       <aside className={`sidebar ${open ? 'open' : ''}`} aria-label="Main">
         <div className="sidebar-logo">
-          <a href="https://bimblyai.com" aria-label="Bimbly home">
+          <a href="#/home" aria-label="Dashboard home" onClick={e => { e.preventDefault(); go('home'); }}>
             <img src="/dashboard/brand/bimblyai-logo-primary.svg" alt="Bimblyai" width="133" height="32" />
           </a>
         </div>
@@ -1923,39 +1923,49 @@ const STATUS_INFO = {
   trial:      { tone: 'blue',  label: 'Free trial' },
   trialing:   { tone: 'blue',  label: 'Free trial' },
   active:     { tone: 'green', label: 'Active' },
-  cancelling: { tone: 'amber', label: 'Cancels at period end' },
+  cancelling: { tone: 'amber', label: 'Ends soon' },
   cancelled:  { tone: '',      label: 'Cancelled' },
   canceled:   { tone: '',      label: 'Cancelled' },
   past_due:   { tone: 'red',   label: 'Payment due' },
   pending:    { tone: '',      label: 'Pending' },
 };
 
-const UPGRADE_INFO = {
-  solo:    { to: 'starter', label: 'Starter', price: 99,  desc: 'For shops with a small team.' },
-  starter: { to: 'pro',     label: 'Pro',     price: 199, desc: 'For busy shops with a bigger team.' },
+// Same plans and wording as bimblyai.com/#pricing
+const PLAN_ORDER = ['solo', 'starter', 'pro'];
+const PLAN_INFO = {
+  solo: {
+    name: 'Solo', who: 'Just you', price: 39,
+    features: ['1 team member', 'Everything every plan includes', '"Powered by Bimbly" shown on your booking page'],
+  },
+  starter: {
+    name: 'Starter', who: '2 to 4 people', price: 99,
+    features: ['Up to 4 team members, each with their own calendar', 'Your logo on your booking page', 'Download your bookings and client list'],
+  },
+  pro: {
+    name: 'Pro', who: '5 or more people', price: 199,
+    features: ['5 or more team members', 'Everything in Starter', 'Priority support from real people, with faster replies'],
+  },
 };
-
-const UPGRADE_FEATURES = {
-  solo:    ['Walk-in waitlist management', 'No-show deposit collection', 'Full analytics dashboard', 'Up to 4 team members'],
-  starter: ['Unlimited team members', 'Priority support', 'Advanced multi-location analytics', 'Custom AI voice & persona'],
-};
-
-const PLAN_FEATURES = [
-  '24/7 AI receptionist answers every call',
-  'Text confirmations to your customers',
-  'Email notifications straight to you',
-  'Google Calendar sync',
-  'Online dashboard and analytics',
-  'Unlimited bookings',
+const EVERY_PLAN = [
+  'Answers every call, day and night, with no call limit',
+  "Books into each person's calendar",
+  'Text confirmations and reminders',
+  'Your own booking page for Google Maps and Instagram',
+  'Walk-in line with a QR code',
+  'Deposits to cut no-shows',
+  'Client history for every customer',
+  'Your bookings and numbers at a glance',
 ];
 
-function BillingPage({ business }) {
+function BillingPage({ business, onBusinessUpdated, go }) {
   const toast = useToast();
   const [billing, setBilling] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [showModal, setShowModal] = useState(false);
+  const [showCancel, setShowCancel] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [target, setTarget] = useState(null);
+  const [changing, setChanging] = useState(false);
 
   useEffect(() => {
     api('/api/billing')
@@ -1969,91 +1979,150 @@ function BillingPage({ business }) {
     try {
       await api('/api/billing/cancel', { method: 'POST' });
       setBilling(b => ({ ...b, subscription_status: 'cancelling', cancel_at_period_end: true }));
-      setShowModal(false);
+      setShowCancel(false);
       toast('Your subscription will end at the close of this billing period');
     } catch (err) {
       toast(err.message, 'error');
     } finally { setCancelling(false); }
   };
 
-  if (loading) return <Spinner />;
+  const changePlan = async () => {
+    setChanging(true);
+    try {
+      const d = await api('/api/billing/change-plan', { method: 'POST', body: JSON.stringify({ plan: target }) });
+      onBusinessUpdated({ plan: d.plan });
+      setBilling(b => ({ ...b, amount: d.amount != null ? d.amount : PLAN_INFO[d.plan].price }));
+      toast(`You're now on ${PLAN_INFO[d.plan].name}`);
+      setTarget(null);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally { setChanging(false); }
+  };
 
-  const plan = business?.plan || 'solo';
-  const status = billing?.cancel_at_period_end && billing?.subscription_status !== 'cancelled' ? 'cancelling' : (billing?.subscription_status || 'unknown');
-  const info = STATUS_INFO[status] || { tone: '', label: capitalize(status) };
+  if (loading || !business) return <Spinner />;
+
+  const plan = PLAN_INFO[business.plan] ? business.plan : 'solo';
+  const info = PLAN_INFO[plan];
+  const rawStatus = billing?.subscription_status || 'inactive';
+  const status = billing?.cancel_at_period_end && !['cancelled', 'canceled'].includes(rawStatus) ? 'cancelling' : rawStatus;
+  const statusInfo = STATUS_INFO[status] || { tone: '', label: capitalize(status) };
   const isTrial = status === 'trial' || status === 'trialing';
-  const amount = billing?.amount != null ? Number(billing.amount) : null;
-  const upgrade = UPGRADE_INFO[plan];
+  const amount = billing?.amount != null ? Number(billing.amount) : info.price;
   const longDate = unix => unix ? new Date(unix * 1000).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' }) : null;
   const periodEnd = longDate(billing?.current_period_end);
   const trialEnd = longDate(billing?.trial_end);
+  const isEnded = ['cancelled', 'canceled', 'inactive'].includes(status);
+  const canChange = !!business.stripe_subscription_id && !isEnded && status !== 'cancelling';
+  const teamCount = normalizeTeam(business.team_members || business.barbers).length;
+  const rank = p => PLAN_ORDER.indexOf(p);
+
+  const t = target && PLAN_INFO[target];
+  const isUpgrade = target && rank(target) > rank(plan);
+  const overLimit = target && teamCount > teamLimit(target) ? teamCount - teamLimit(target) : 0;
 
   return (
-    <div className="page-content page-narrow" style={{ maxWidth: 1000 }}>
+    <div className="page-content page-narrow" style={{ maxWidth: 1040 }}>
       {error && <Notice type="error">{error}</Notice>}
-      {status === 'past_due' && <Notice type="error">Your last payment didn't go through. Update your card to keep your receptionist answering calls.</Notice>}
+      {status === 'past_due' && <Notice type="error">Your last payment didn't go through. Update your card to keep your receptionist answering calls. Email <a href="mailto:hello@bimblyai.com">hello@bimblyai.com</a> if you need a hand.</Notice>}
 
-      <div className="billing-grid">
-        <section className="card">
-          <div className="card-head">
-            <div>
-              <p className="muted small" style={{ fontWeight: 700 }}>Current plan</p>
-              <h2 className="plan-name">Bimbly {PLAN_LABELS[plan] || plan}</h2>
-            </div>
-            <span className={`badge ${info.tone ? 'badge--' + info.tone : ''}`}>{info.label}</span>
+      <section className="card">
+        <div className="card-head">
+          <div>
+            <p className="muted small" style={{ fontWeight: 700 }}>Your plan</p>
+            <h2 className="plan-name">Bimbly {info.name} <span className="muted" style={{ fontWeight: 600, fontSize: 15, letterSpacing: 0 }}>· {info.who}</span></h2>
           </div>
-          <div className="card-body">
-            <div className="plan-price">{amount != null ? `CA$${amount.toFixed(0)}` : '-'}<span> / month{isTrial ? ' after your trial' : ''}</span></div>
-            {isTrial && trialEnd && <Notice>Your free trial ends <strong>{trialEnd}</strong>. Your card is charged after that.</Notice>}
-            {status === 'cancelling' && <Notice type="warn">Your subscription ends {periodEnd ? <strong>{periodEnd}</strong> : 'at the end of this billing period'}. Your receptionist answers calls until then.</Notice>}
-            {!isTrial && status !== 'cancelling' && periodEnd && (
-              <dl className="kv"><dt>Next payment</dt><dd>{periodEnd}</dd></dl>
-            )}
-            <ul className="check-list">
-              {PLAN_FEATURES.map(f => <li key={f}><Icon name="check" />{f}</li>)}
-            </ul>
-          </div>
-          {status !== 'cancelled' && status !== 'canceled' && status !== 'cancelling' && (
-            <div className="card-foot" style={{ justifyContent: 'flex-start' }}>
-              <button className="btn-link btn-link--muted small" onClick={() => setShowModal(true)}>Cancel subscription</button>
-            </div>
+          <span className={`badge ${statusInfo.tone ? 'badge--' + statusInfo.tone : ''}`}>{statusInfo.label}</span>
+        </div>
+        <div className="card-body stack" style={{ gap: 16 }}>
+          <div className="plan-price">CA${amount.toFixed(0)}<span> / month{isTrial ? ' after your free trial' : ''}</span></div>
+          {isTrial && trialEnd && <Notice>Your free trial ends <strong>{trialEnd}</strong>. Your card is charged after that.</Notice>}
+          {status === 'cancelling' && <Notice type="warn">Your plan ends {periodEnd ? <strong>{periodEnd}</strong> : 'at the end of this billing period'}. Your receptionist answers calls until then. To keep Bimbly or change plans, email <a href="mailto:hello@bimblyai.com">hello@bimblyai.com</a>.</Notice>}
+          {isEnded && <Notice type="warn">You don't have an active subscription. Email <a href="mailto:hello@bimblyai.com">hello@bimblyai.com</a> and we'll get you set up again.</Notice>}
+          {!isTrial && !isEnded && status !== 'cancelling' && periodEnd && (
+            <dl className="kv"><dt>Next payment</dt><dd>{periodEnd}</dd></dl>
           )}
-        </section>
-
-        {upgrade ? (
-          <section className="card card--upgrade">
-            <div className="card-head" style={{ borderBottomColor: 'transparent' }}>
-              <div>
-                <p className="small" style={{ fontWeight: 700, color: 'var(--ink-deep)' }}>Upgrade</p>
-                <h2 className="plan-name">Bimbly {upgrade.label}</h2>
-                <p className="card-desc">{upgrade.desc}</p>
-              </div>
-            </div>
-            <div className="card-body">
-              <div className="plan-price">CA${upgrade.price}<span> / month</span></div>
-              <ul className="check-list">
-                {(UPGRADE_FEATURES[plan] || []).map(f => <li key={f}><Icon name="check" />{f}</li>)}
-              </ul>
-              <button className="btn btn--primary btn--block" style={{ marginTop: 'auto' }}
-                onClick={() => { window.location.href = `/billing/checkout?businessId=${business?.id}&plan=${upgrade.to}`; }}>
-                Upgrade to {upgrade.label}<Icon name="arrow" />
-              </button>
-            </div>
-          </section>
-        ) : (
-          <section className="card card--upgrade">
-            <div className="card-body" style={{ justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-              <div className="empty-icon" style={{ margin: 0 }}><Icon name="sparkle" /></div>
-              <h2 className="plan-name">You're on our top plan</h2>
-              <p className="muted">Thanks for being a Pro member. Questions? Email <a href="mailto:hello@bimblyai.com">hello@bimblyai.com</a>.</p>
-            </div>
-          </section>
+        </div>
+        {!isEnded && status !== 'cancelling' && (
+          <div className="card-foot" style={{ justifyContent: 'flex-start' }}>
+            <button className="btn-link btn-link--muted small" onClick={() => setShowCancel(true)}>Cancel subscription</button>
+          </div>
         )}
+      </section>
+
+      <div>
+        <h2 style={{ fontSize: 19, fontWeight: 800 }}>Change plan</h2>
+        <p className="muted" style={{ marginTop: 4 }}>Every plan answers every call and takes every booking. Pick by team size.</p>
       </div>
 
-      {showModal && (
+      <div className="plans-grid">
+        {PLAN_ORDER.map(id => {
+          const p = PLAN_INFO[id];
+          const current = id === plan;
+          const up = rank(id) > rank(plan);
+          return (
+            <section key={id} className={`card plan-card ${current ? 'plan-card--current' : ''}`}>
+              <div className="card-body">
+                <div className="row" style={{ justifyContent: 'space-between' }}>
+                  <h3 className="plan-name">{p.name}</h3>
+                  {current && <span className="badge badge--blue">Your plan</span>}
+                </div>
+                <p className="muted small" style={{ marginTop: -12 }}>{p.who}</p>
+                <div className="plan-price">CA${p.price}<span> / month</span></div>
+                <ul className="check-list">
+                  {p.features.map(f => <li key={f}><Icon name="check" />{f}</li>)}
+                </ul>
+                {current ? (
+                  <button className="btn btn--secondary btn--block" disabled>Current plan</button>
+                ) : (
+                  <button className={`btn btn--block ${up ? 'btn--primary' : 'btn--secondary'}`} disabled={!canChange} onClick={() => setTarget(id)}>
+                    {up ? `Upgrade to ${p.name}` : `Switch to ${p.name}`}{up && <Icon name="arrow" />}
+                  </button>
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      <Card title="Every plan includes">
+        <ul className="check-list check-list--2col">
+          {EVERY_PLAN.map(f => <li key={f}><Icon name="check" />{f}</li>)}
+        </ul>
+      </Card>
+
+      {target && (
+        <ConfirmDialog
+          title={isUpgrade ? `Upgrade to ${t.name}?` : `Switch to ${t.name}?`}
+          confirmLabel={isUpgrade ? `Upgrade to ${t.name}` : `Switch to ${t.name}`}
+          danger={false}
+          busy={changing}
+          onCancel={() => setTarget(null)}
+          onConfirm={changePlan}
+        >
+          <div className="stack" style={{ gap: 12 }}>
+            <p>
+              Your plan changes to <strong>{t.name}</strong> right away.{' '}
+              {isTrial
+                ? <>Nothing is charged during your free trial. After {trialEnd || 'it ends'}, it's <strong>CA${t.price}/month</strong>.</>
+                : isUpgrade
+                  ? <>Your card is charged the difference for the rest of this billing period, then <strong>CA${t.price}/month</strong>.</>
+                  : <>The unused part of your current plan becomes a credit on your next bill. After that, it's <strong>CA${t.price}/month</strong>.</>}
+            </p>
+            {!isUpgrade && target === 'solo' && <p>Your logo on the booking page and data downloads are part of Starter and Pro.</p>}
+            {overLimit > 0 && (
+              <Notice type="warn">
+                You have {teamCount} team members and {t.name} includes {teamLimit(target)}. Remove {overLimit} in{' '}
+                <button className="btn-link" onClick={() => { setTarget(null); go('settings', 'team'); }}>Settings, Team</button> after you switch.
+              </Notice>
+            )}
+          </div>
+        </ConfirmDialog>
+      )}
+
+      {showCancel && (
         <ConfirmDialog title="Cancel your subscription?" confirmLabel="Yes, cancel" cancelLabel="Keep my plan" busy={cancelling}
-          onCancel={() => setShowModal(false)} onConfirm={cancelSub}>
+          onCancel={() => setShowCancel(false)} onConfirm={cancelSub}>
           Your service continues until <strong>{periodEnd || trialEnd || 'the end of the billing period'}</strong>. After that, your AI receptionist stops answering calls.
         </ConfirmDialog>
       )}
@@ -2443,7 +2512,7 @@ function App() {
           {known === 'clients'    && <ClientsPage clients={clients} setClients={setClients} go={go} initialSearch={sub} />}
           {known === 'client'     && <ClientProfilePage key={sub} clientId={sub} setClients={setClients} go={go} />}
           {known === 'settings'   && <SettingsPage tab={sub} go={go} onBusinessUpdated={onBusinessUpdated} />}
-          {known === 'billing'    && <BillingPage business={business} />}
+          {known === 'billing'    && <BillingPage business={business} onBusinessUpdated={onBusinessUpdated} go={go} />}
           {known === 'onboarding' && <OnboardingPage go={go} />}
         </main>
       </div>

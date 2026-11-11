@@ -25,7 +25,7 @@ const stripe = require('stripe')(
     ? process.env.STRIPE_TEST_SECRET_KEY
     : process.env.STRIPE_SECRET_KEY
 );
-const { createCheckoutSession } = require('./billingService');
+const { createCheckoutSession, planForPriceId } = require('./billingService');
 const { handleDepositCheckoutComplete } = require('./depositService');
 const { createBusiness } = require('./signupService');
 const { validateSignup } = require('./signupValidation');
@@ -206,8 +206,12 @@ app.post('/billing/webhook', express.raw({ type: 'application/json' }), async (r
         paused: 'paused'
       };
       const newStatus = statusMap[sub.status] || sub.status;
+      const updates = { subscription_status: newStatus };
+      // Keep the plan in sync with the subscription's price (plan changes)
+      const newPlan = planForPriceId(sub.items?.data?.[0]?.price?.id);
+      if (newPlan) updates.plan = newPlan;
       await supabase.from('businesses')
-        .update({ subscription_status: newStatus })
+        .update(updates)
         .eq('stripe_customer_id', sub.customer);
       console.log(`🔄 Subscription updated to "${newStatus}" for customer: ${sub.customer}`);
     }
@@ -563,11 +567,18 @@ app.get('/billing/checkout', async (req, res) => {
   try {
     const { data: business, error } = await supabase
       .from('businesses')
-      .select('id, email, billing_email, plan')
+      .select('id, email, billing_email, plan, stripe_subscription_id')
       .eq('id', businessId)
       .single();
 
     if (error || !business) return res.status(404).send('Business not found');
+
+    // A shop that already subscribed must change plans from the dashboard
+    // (POST /api/billing/change-plan). A second checkout would start a second
+    // subscription and re-run provisioning (new phone number, new assistant).
+    if (business.stripe_subscription_id) {
+      return res.redirect(303, '/dashboard/#/billing');
+    }
 
     // Use plan from query param (upgrade flow), fall back to business's current plan
     const checkoutPlan = plan || business.plan || 'solo';

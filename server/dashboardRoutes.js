@@ -1,7 +1,7 @@
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const authMiddleware = require('./authMiddleware');
-const { cancelSubscription } = require('./billingService');
+const { cancelSubscription, changeSubscriptionPlan, PLANS } = require('./billingService');
 const depositService = require('./depositService');
 const QRCode = require('qrcode');
 const queueService = require('./queueService');
@@ -638,6 +638,43 @@ router.get('/api/billing', async (req, res) => {
   } catch (err) {
     console.error('GET /api/billing error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/billing/change-plan { plan } — upgrade or downgrade the existing subscription
+router.post('/api/billing/change-plan', async (req, res) => {
+  const { plan } = req.body || {};
+  const { stripe_subscription_id, subscription_status } = req.business;
+  const current = req.business.plan || 'solo';
+
+  if (!PLANS.includes(plan)) {
+    return res.status(400).json({ error: 'Choose Solo, Starter or Pro.' });
+  }
+  if (plan === current) {
+    return res.status(400).json({ error: "You're already on this plan." });
+  }
+  if (!stripe_subscription_id || ['cancelled', 'canceled'].includes(subscription_status)) {
+    return res.status(400).json({ error: 'There is no active subscription to change. Email hello@bimblyai.com and we will get you set up.' });
+  }
+
+  try {
+    const sub = await changeSubscriptionPlan(stripe_subscription_id, plan);
+    const { error } = await supabase
+      .from('businesses')
+      .update({ plan })
+      .eq('id', req.business.id);
+    if (error) throw error;
+
+    const unitAmount = sub.items?.data?.[0]?.price?.unit_amount;
+    res.json({
+      success: true,
+      plan,
+      amount: unitAmount != null ? unitAmount / 100 : null,
+      cancel_at_period_end: !!sub.cancel_at_period_end,
+    });
+  } catch (err) {
+    console.error('POST /api/billing/change-plan error:', err.message);
+    res.status(500).json({ error: 'We could not change your plan. Please try again or email hello@bimblyai.com.' });
   }
 });
 

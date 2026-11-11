@@ -104,7 +104,8 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - Hash routing: #/home, #/bookings, #/queue, #/clients[/search], #/client/<id>, #/settings/<tab>, #/billing, #/onboarding (refresh and back button work)
 - Screens: Home (greeting, stats, today's book, walk-ins, charts, recent bookings), Bookings (Upcoming/Today/7/30 days + search), Walk-ins, Clients + profile, Settings tabs (Business, Hours, Services, Team, Booking page, Deposits, Walk-ins, Account), Billing, Setup wizard
 - Mobile (<768px): sidebar becomes a slide-out menu from the top bar button
-- Sidebar logo links to https://bimblyai.com
+- Sidebar logo goes to the dashboard home (#/home), not bimblyai.com
+- Billing page: current plan card, then all three plans (Solo/Starter/Pro, wording copied from bimblyai.com pricing) with Upgrade/Switch buttons on every non-current plan; plan changes are disabled when cancelling/cancelled (shop emails hello@bimblyai.com)
 - Business name rendered from GET /api/business → data.business.name
 
 ## Dashboard API Endpoints (all require auth)
@@ -118,6 +119,7 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - DELETE /api/services/:id — delete service (ownership verified)
 - GET  /api/billing — { subscription_status, trial_end (unix), current_period_end (unix), amount, currency, cancel_at_period_end }
 - POST /api/billing/cancel — cancel subscription at period end
+- POST /api/billing/change-plan { plan } — upgrade/downgrade by swapping the price on the EXISTING subscription (changeSubscriptionPlan in billingService.js, prorated) and setting businesses.plan. Never use a new Checkout for an existing shop: handleCheckoutCompleted re-provisions (new Twilio number + Vapi assistant) and a second subscription would bill twice
 
 ## Self-Serve Signup Flow
 - The signup form lives on the website (bimblyai.com/signup). GET /signup here 302-redirects there, keeping ?plan=
@@ -137,11 +139,11 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - signupService.js: duplicate email → friendly isUserFacing error with 409
 
 ## Stripe Billing
-- GET /billing/checkout?businessId=xxx — creates Checkout Session, redirects to Stripe
+- GET /billing/checkout?businessId=xxx — creates Checkout Session, redirects to Stripe. Only for shops with no stripe_subscription_id; others are redirected to /dashboard/#/billing
 - POST /billing/webhook — handles Stripe events (raw body required for sig verification)
 - GET /billing/success — post-checkout success page
 - GET /billing/cancel — post-checkout cancel page
-- Webhook handles: checkout.session.completed, customer.subscription.deleted, customer.subscription.updated, invoice.payment_failed
+- Webhook handles: checkout.session.completed, customer.subscription.deleted, customer.subscription.updated (also syncs plan from the price ID via planForPriceId), invoice.payment_failed
 - STRIPE_WEBHOOK_SECRET: Stripe Dashboard → Developers → Webhooks → endpoint https://bookingagent-gmo2.onrender.com/billing/webhook
 
 ## Supabase — businesses table (run in SQL editor if not yet applied)
