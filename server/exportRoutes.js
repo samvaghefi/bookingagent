@@ -1,5 +1,6 @@
 'use strict';
 
+const { phoneKey } = require('./clientService');
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
 const authMiddleware = require('./authMiddleware');
@@ -98,7 +99,7 @@ router.get('/api/export/clients', authMiddleware, requireExportPlan, async (req,
     // Compute per-phone stats from bookings
     const stats = {};
     for (const b of (bookings || [])) {
-      const phone = b.customer_phone;
+      const phone = phoneKey(b.customer_phone);
       if (!phone) continue;
       if (!stats[phone]) stats[phone] = { visits: 0, lastVisit: null, services: {}, barbers: {} };
       const s = stats[phone];
@@ -112,7 +113,7 @@ router.get('/api/export/clients', authMiddleware, requireExportPlan, async (req,
     const headers = ['Name', 'Phone', 'Total Visits', 'Last Visit', 'Preferred Service', 'Preferred Team Member', 'Tags', 'Notes', 'Created At'];
 
     const rows = (clients || []).map(c => {
-      const s = stats[c.phone] || { visits: 0, lastVisit: null, services: {}, barbers: {} };
+      const s = stats[phoneKey(c.phone)] || { visits: 0, lastVisit: null, services: {}, barbers: {} };
       const preferredService = Object.keys(s.services).sort((a, b) => s.services[b] - s.services[a])[0] || '';
       const preferredBarber  = Object.keys(s.barbers).sort((a, b) => s.barbers[b] - s.barbers[a])[0] || '';
       return [

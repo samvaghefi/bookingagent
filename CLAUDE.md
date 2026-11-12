@@ -69,6 +69,12 @@ Sam's Barbershop, Toronto
 - Server URL: https://bookingagent-gmo2.onrender.com/webhook/booking
 - 10 properties: customerName, service, appointmentDate, appointmentTime, specialRequests, customerPhone, callbackNumber, serviceCount, preferredBarber, isNewCustomer
 
+## Clients (CRM)
+- server/clientService.js: ensureClient(businessId, {name, phone}) adds the customer to `clients` unless one with the same phone digits exists (never overwrites, never throws). Called for phone-call bookings (bookingService.upsertClient), booking page, manual dashboard bookings and walk-ins
+- Phones come in many formats (+16475551234, 16475551234, 6475551234, typed). Always match with phoneKey()/phoneVariants(), never raw string equality. New clients/manual bookings store toE164() (+1XXXXXXXXXX)
+- Client stats (/api/clients, export) are keyed by phoneKey; client history queries bookings with .in('customer_phone', phoneVariants(phone))
+- Backfill past customers: node scripts/backfill-clients.js [--dry-run] [--business <id>]
+
 ## Database Tables
 - businesses — one row per customer business; includes Google OAuth tokens, Stripe IDs, plan, barbers
 - bookings — all appointments, 16+ columns: is_new_customer, preferred_barber, service_count, callback_number, service_ids (array)

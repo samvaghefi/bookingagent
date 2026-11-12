@@ -1,3 +1,4 @@
+const { ensureClient } = require('./clientService');
 const { createClient } = require('@supabase/supabase-js');
 const depositService = require('./depositService');
 const notificationService = require('./notificationService');
@@ -234,27 +235,10 @@ async function findBusiness(phoneNumber, assistantId) {
   return data;
 }
 
-// Upsert a client record for this booking (non-blocking — failure only logs a warning)
+// Add the caller to the shop's client list (non-blocking — failure only logs a warning).
+// Matches existing clients by phone digits, so different formats don't create duplicates.
 async function upsertClient(business, bookingData) {
-  if (!bookingData.customerPhone || !bookingData.name) return;
-  try {
-    await supabase
-      .from('clients')
-      .upsert(
-        {
-          business_id: business.id,
-          phone: bookingData.customerPhone,
-          name: bookingData.name,  // extractFromToolCall() maps customerName → name
-          updated_at: new Date().toISOString()
-        },
-        {
-          onConflict: 'business_id,phone',
-          ignoreDuplicates: false
-        }
-      );
-  } catch (upsertErr) {
-    console.warn('⚠️  Client upsert failed (non-blocking):', upsertErr.message);
-  }
+  await ensureClient(business.id, { name: bookingData.name, phone: bookingData.customerPhone });
 }
 
 // Save booking to database

@@ -7,7 +7,8 @@ const { createCalendarEvent } = require('./calendarService');
 const availability = require('./availabilityService');
 const { sendCustomerSMS, sendOwnerEmail }  = require('./notificationService');
 const { maybeScheduleReminder }            = require('./reminderService');
-const { createDepositToken }               = require('./depositService'); // already exists at server/depositService.js
+const { createDepositToken }               = require('./depositService');
+const { ensureClient }                     = require('./clientService'); // already exists at server/depositService.js
 
 const router   = express.Router();
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -201,6 +202,9 @@ router.post('/api/book/:businessId', async (req, res) => {
       .single();
 
     if (insertErr) throw insertErr;
+
+    // Add the customer to the shop's client list (never blocks the booking)
+    await ensureClient(business.id, { name: booking.customer_name, phone: booking.customer_phone });
 
     // Notifications — non-blocking
     (async () => {

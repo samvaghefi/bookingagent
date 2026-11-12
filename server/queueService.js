@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const notificationService = require('./notificationService');
+const { ensureClient } = require('./clientService');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -25,6 +26,9 @@ async function joinQueue(businessId, { customerName, customerPhone, service, pre
     .single();
 
   if (error) throw error;
+
+  // Walk-ins go into the shop's client list too (never blocks the check-in)
+  await ensureClient(businessId, { name: customerName, phone: customerPhone });
 
   const queue = await getActiveQueue(businessId);
   const position = queue.findIndex(e => e.id === entry.id) + 1;

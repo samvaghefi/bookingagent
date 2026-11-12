@@ -13,6 +13,7 @@ const availability = require('./availabilityService');
 const { createCalendarEvent } = require('./calendarService');
 const { sendCustomerSMS } = require('./notificationService');
 const { maybeScheduleReminder } = require('./reminderService');
+const { phoneKey, phoneVariants, toE164, ensureClient } = require('./clientService');
 
 const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://bookingagent-gmo2.onrender.com';
 
@@ -229,7 +230,7 @@ router.post('/api/bookings', async (req, res) => {
     const record = {
       business_id: req.business.id,
       customer_name: customerName,
-      customer_phone: customerPhone || null,
+      customer_phone: customerPhone ? toE164(customerPhone) : null,
       customer_email: customerEmail || null,
       service_ids: [match?.name || service],
       appointment_date: date,
@@ -251,6 +252,9 @@ router.post('/api/bookings', async (req, res) => {
       ({ data: booking, error } = await supabase.from('bookings').insert(withoutName).select().single());
     }
     if (error) throw error;
+
+    // Add the customer to the client list (never blocks the booking)
+    if (booking.customer_phone) await ensureClient(req.business.id, { name: booking.customer_name, phone: booking.customer_phone });
 
     // Calendar event + optional confirmation text; no owner email (they made it)
     (async () => {
@@ -578,11 +582,12 @@ router.delete('/api/services/:id', async (req, res) => {
 
 // ── Clients ───────────────────────────────────────────────────────────────────
 
-// Helper: compute per-phone stats from a bookings array
+// Helper: compute per-phone stats from a bookings array.
+// Keyed by phoneKey() so "+16475551234" and "647 555 1234" are the same person.
 function computeClientStats(bookings) {
   const stats = {};
   for (const b of bookings) {
-    const phone = b.customer_phone;
+    const phone = phoneKey(b.customer_phone);
     if (!phone) continue;
     if (!stats[phone]) {
       stats[phone] = { visit_count: 0, last_visit: null, services: {}, barbers: {} };
@@ -626,7 +631,7 @@ router.get('/api/clients', async (req, res) => {
 
     const enriched = (clients || []).map(c => ({
       ...c,
-      ...(stats[c.phone] || { visit_count: 0, last_visit: null, preferred_service: null, preferred_barber: null })
+      ...(stats[phoneKey(c.phone)] || { visit_count: 0, last_visit: null, preferred_service: null, preferred_barber: null })
     }));
 
     res.json({ clients: enriched });
@@ -647,9 +652,19 @@ router.post('/api/clients', async (req, res) => {
   }
 
   try {
+    const { data: dupes } = await supabase
+      .from('clients')
+      .select('id')
+      .eq('business_id', req.business.id)
+      .in('phone', phoneVariants(phone))
+      .limit(1);
+    if (dupes && dupes.length) {
+      return res.status(409).json({ error: 'A client with this phone number already exists.' });
+    }
+
     const { data: client, error } = await supabase
       .from('clients')
-      .insert({ business_id: req.business.id, name, phone, notes: notes || null, tags: tags || [] })
+      .insert({ business_id: req.business.id, name, phone: toE164(phone), notes: notes || null, tags: tags || [] })
       .select()
       .single();
 
@@ -683,14 +698,14 @@ router.get('/api/clients/:id', async (req, res) => {
       .from('bookings')
       .select('*')
       .eq('business_id', req.business.id)
-      .eq('customer_phone', client.phone)
+      .in('customer_phone', phoneVariants(client.phone))
       .order('appointment_date', { ascending: false })
       .order('appointment_time', { ascending: false });
 
     if (bErr) throw bErr;
 
     const stats = computeClientStats(bookings || []);
-    const enriched = { ...client, ...(stats[client.phone] || { visit_count: 0, last_visit: null, preferred_service: null, preferred_barber: null }) };
+    const enriched = { ...client, ...(stats[phoneKey(client.phone)] || { visit_count: 0, last_visit: null, preferred_service: null, preferred_barber: null }) };
 
     res.json({ client: enriched, bookings: bookings || [] });
   } catch (err) {

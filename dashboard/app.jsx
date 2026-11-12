@@ -127,6 +127,12 @@ function fmtPhone(p) {
   return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
 }
 
+// Same person, different formats: "+16475551234" == "647 555 1234"
+function phoneKey(p) {
+  const d = String(p || '').replace(/\D/g, '');
+  return d.length === 11 && d[0] === '1' ? d.slice(1) : d;
+}
+
 function initials(name) {
   return String(name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
 }
@@ -945,7 +951,7 @@ function BookingsPage({ business, clients, go }) {
               emptyTitle={q ? 'No matches' : emptyCopy[0]}
               emptySub={q ? 'Try a different name, phone number or service.' : emptyCopy[1]}
               onClientClick={b => {
-                const match = clients.find(c => c.phone === b.customer_phone);
+                const match = clients.find(c => phoneKey(c.phone) === phoneKey(b.customer_phone));
                 if (match) go('client', match.id);
                 else go('clients', b.customer_phone);
               }}
@@ -3074,6 +3080,13 @@ function App() {
   useEffect(() => {
     document.title = `${TITLES[route.page] || 'Dashboard'} | Bimbly`;
   }, [route.page]);
+
+  // New clients arrive from calls, the booking page, walk-ins and bookings added
+  // here, so refresh the client list whenever the Clients or Bookings page opens.
+  useEffect(() => {
+    if (!authed || !['clients', 'bookings'].includes(route.page)) return;
+    api('/api/clients').then(d => setClients(d.clients || [])).catch(() => {});
+  }, [authed, route.page]);
 
   const onBusinessUpdated = useCallback(patch => setBusiness(b => ({ ...(b || {}), ...patch })), []);
 
