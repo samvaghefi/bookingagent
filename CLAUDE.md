@@ -135,7 +135,7 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - GET  /api/business — business details (no tokens/secrets)
 - PUT  /api/business — update name, phone, address, business_hours, ai_name, barbers
 - GET  /api/bookings — bookings with optional ?date=, ?from=&to=, ?limit= (default: last 30 days)
-- GET  /api/analytics — dates computed in the business timezone (luxon); revenue estimate priced from the business's services table. Returns totalBookingsThisMonth/LastMonth, todayBookings (array), upcomingBookings (array), revenueEstimateThisMonth, busiestDays, popularServices, peakHours, bookingsByWeek
+- GET  /api/analytics — dates computed in the business timezone (luxon); revenue estimate priced from the business's services table. Walk-ins (walk_in_queue, except no_show/removed) count too, dated by check-in time in the shop's time zone, with source 'walk_in' and status 'walk-in'. Returns totalBookingsThisMonth/LastMonth, todayBookings (array), upcomingBookings (array), revenueEstimateThisMonth, busiestDays, popularServices, peakHours, bookingsByWeek
 - GET  /api/services — all services for the business
 - POST /api/services — create service { name, price, duration_minutes, description }
 - PUT  /api/services/:id — update service (ownership verified)
