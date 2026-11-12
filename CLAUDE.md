@@ -136,6 +136,8 @@ SUPABASE_URL, SUPABASE_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SENDGRID_API_
 - PUT  /api/business — update name, phone, address, business_hours, ai_name, barbers
 - GET  /api/bookings — bookings with optional ?date=, ?from=&to=, ?limit= (default: last 30 days)
 - GET  /api/analytics — dates computed in the business timezone (luxon); revenue estimate priced from the business's services table. Walk-ins (walk_in_queue, except no_show/removed) count too, dated by check-in time in the shop's time zone, with source 'walk_in' and status 'walk-in'. Returns totalBookingsThisMonth/LastMonth, todayBookings (array), upcomingBookings (array), revenueEstimateThisMonth, busiestDays, popularServices, peakHours, bookingsByWeek
+- POST /api/bookings — owner/team member adds a booking by hand (AddBookingDialog on Home and Bookings). Body: customerName, customerPhone?, customerEmail?, service, date YYYY-MM-DD, time HH:MM, teamMember?, notes?, bookedBy (must be a team member or owner_name), textCustomer, force. Saved with source 'manual' + booked_by (scripts/migrations/add-booked-by.sql). Same availability check as calls; not free → 409 { error, reason, alternatives } unless force. Creates the Google Calendar event; texts the customer only if textCustomer
+- Booking source labels (bookedByLabel/BookedBy in app.jsx, "Booked by" column): voice/null → "Bimbly · call", online → "Bimbly · online", walk_in → "Walk-in", manual → booked_by name
 - GET  /api/services — all services for the business
 - POST /api/services — create service { name, price, duration_minutes, description }
 - PUT  /api/services/:id — update service (ownership verified)

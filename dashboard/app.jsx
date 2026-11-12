@@ -524,6 +524,7 @@ function BookingsTable({ bookings, showCustomer = true, compact = false, onClien
             <th>Team member</th>
             {!compact && <th>Notes</th>}
             <th>Status</th>
+            <th>Booked by</th>
             {showDeposits && <th className="col-actions">Deposit</th>}
           </tr>
         </thead>
@@ -548,6 +549,7 @@ function BookingsTable({ bookings, showCustomer = true, compact = false, onClien
               <td>{b.preferred_barber || <span className="muted">Anyone</span>}</td>
               {!compact && <td><div className="cell-clip" title={b.special_requests || ''}>{b.special_requests || <span className="muted">-</span>}</div></td>}
               <td><StatusBadge status={b.status} /></td>
+              <td><BookedBy booking={b} /></td>
               {showDeposits && (
                 <td className="col-actions">
                   <div className="row" style={{ justifyContent: 'flex-end' }}>
@@ -585,6 +587,148 @@ function BookingsTable({ bookings, showCustomer = true, compact = false, onClien
   );
 }
 
+// How a booking was made: by Bimbly (phone call or online booking page),
+// by a team member from the dashboard (shows their name), or a walk-in.
+function bookedByLabel(b) {
+  const source = String(b.source || 'voice').toLowerCase();
+  if (source === 'manual') return { text: b.booked_by || 'Team member', tone: '', title: b.booked_by ? `Added by ${b.booked_by}` : 'Added from the dashboard' };
+  if (source === 'walk_in') return { text: 'Walk-in', tone: 'amber', title: 'Checked in as a walk-in' };
+  if (source === 'online') return { text: 'Bimbly · online', tone: 'blue', title: 'Booked on your Bimbly booking page' };
+  return { text: 'Bimbly · call', tone: 'blue', title: 'Booked by Bimbly on a phone call' };
+}
+
+function BookedBy({ booking }) {
+  const l = bookedByLabel(booking);
+  return <span className={`badge ${l.tone ? 'badge--' + l.tone : 'badge--outline'}`} title={l.title}>{l.text}</span>;
+}
+
+function nextQuarterHour() {
+  const d = new Date();
+  const m = Math.ceil((d.getHours() * 60 + d.getMinutes() + 1) / 15) * 15;
+  if (m >= 24 * 60) return '09:00';
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+// Owner or a team member adds a booking by hand (phone-in at the desk, regulars, etc.)
+function AddBookingDialog({ business, onClose, onSaved }) {
+  const toast = useToast();
+  const members = normalizeTeam(business?.team_members || business?.barbers).map(m => m.name).filter(Boolean);
+  const bookers = [...new Set([...members, business?.owner_name].filter(Boolean))];
+  const [services, setServices] = useState(null);
+  const [form, setForm] = useState({
+    customerName: '', customerPhone: '', customerEmail: '',
+    service: '', date: localISODate(), time: nextQuarterHour(),
+    teamMember: '', notes: '', bookedBy: bookers[0] || '', textCustomer: true,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [conflict, setConflict] = useState(null); // { error, alternatives }
+  const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setConflict(null); };
+
+  useEffect(() => {
+    api('/api/services')
+      .then(d => {
+        const list = d.services || [];
+        setServices(list);
+        if (list.length) setForm(f => (f.service ? f : { ...f, service: list[0].name }));
+      })
+      .catch(() => setServices([]));
+  }, []);
+
+  const save = async (force = false) => {
+    setError('');
+    if (!form.customerName.trim()) { setError('Enter the customer’s name.'); return; }
+    if (!form.service.trim()) { setError('Pick a service.'); return; }
+    if (!form.bookedBy) { setError('Pick who is adding this booking.'); return; }
+    setSaving(true);
+    try {
+      const res = await apiFetch('/api/bookings', { method: 'POST', body: JSON.stringify({ ...form, force }) });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 409) { setConflict(data); setSaving(false); return; }
+      if (!res.ok) throw new Error(data.error || 'Couldn’t save the booking.');
+      toast('Booking added');
+      onSaved(data.booking);
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
+  const hasPhone = form.customerPhone.trim().length > 0;
+
+  return (
+    <Modal title="Add a booking" onClose={onClose} actions={<>
+      <button className="btn btn--secondary" onClick={onClose} disabled={saving}>Cancel</button>
+      {conflict
+        ? <button className="btn btn--primary" onClick={() => save(true)} disabled={saving}>{saving ? 'Saving…' : 'Book anyway'}</button>
+        : <button className="btn btn--primary" form="add-booking-form" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Add booking'}</button>}
+    </>}>
+      <form id="add-booking-form" className="stack" style={{ gap: 16 }} onSubmit={e => { e.preventDefault(); save(false); }}>
+        <div className="form-grid">
+          <Field label="Customer name" htmlFor="ab-name" className="span-2">
+            <input id="ab-name" className="input" maxLength={100} required autoFocus value={form.customerName} onChange={e => set('customerName', e.target.value)} />
+          </Field>
+          <Field label="Phone" optional htmlFor="ab-phone">
+            <input id="ab-phone" className="input" type="tel" inputMode="tel" value={form.customerPhone} onChange={e => set('customerPhone', e.target.value)} />
+          </Field>
+          <Field label="Email" optional htmlFor="ab-email">
+            <input id="ab-email" className="input" type="email" value={form.customerEmail} onChange={e => set('customerEmail', e.target.value)} />
+          </Field>
+          <Field label="Service" htmlFor="ab-service" className="span-2">
+            {services && services.length ? (
+              <select id="ab-service" className="select" value={form.service} onChange={e => set('service', e.target.value)}>
+                {services.map(s => <option key={s.id || s.name} value={s.name}>{s.name}{s.price != null ? ` · ${fmtMoney(s.price)}` : ''}</option>)}
+              </select>
+            ) : (
+              <input id="ab-service" className="input" maxLength={100} required placeholder={services ? 'e.g. Haircut' : 'Loading…'} value={form.service} onChange={e => set('service', e.target.value)} />
+            )}
+          </Field>
+          <Field label="Date" htmlFor="ab-date">
+            <input id="ab-date" className="input" type="date" required value={form.date} onChange={e => set('date', e.target.value)} />
+          </Field>
+          <Field label="Time" htmlFor="ab-time">
+            <input id="ab-time" className="input" type="time" step="900" required value={form.time} onChange={e => set('time', e.target.value)} />
+          </Field>
+          {members.length > 1 && (
+            <Field label="With" htmlFor="ab-member">
+              <select id="ab-member" className="select" value={form.teamMember} onChange={e => set('teamMember', e.target.value)}>
+                <option value="">Anyone</option>
+                {members.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </Field>
+          )}
+          <Field label="Added by" htmlFor="ab-by" className={members.length > 1 ? '' : 'span-2'}>
+            <select id="ab-by" className="select" value={form.bookedBy} onChange={e => set('bookedBy', e.target.value)}>
+              {bookers.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </Field>
+          <Field label="Notes" optional htmlFor="ab-notes" className="span-2">
+            <input id="ab-notes" className="input" maxLength={500} value={form.notes} onChange={e => set('notes', e.target.value)} />
+          </Field>
+        </div>
+        <SwitchRow id="ab-text" title="Text the customer a confirmation"
+          description={hasPhone ? 'Sent from your Bimbly number.' : 'Add a phone number to send one.'}
+          checked={hasPhone && form.textCustomer} disabled={!hasPhone} onChange={v => set('textCustomer', v)} />
+        {conflict && (
+          <Notice type="warn">
+            {conflict.error}
+            {conflict.alternatives && conflict.alternatives.length > 0 && <> Free nearby: {conflict.alternatives.map((a, i) => (
+              <React.Fragment key={a.date + a.time}>
+                {i > 0 && ', '}
+                <button type="button" className="link-name" onClick={() => { setForm(f => ({ ...f, date: a.date, time: a.time })); setConflict(null); }}>
+                  {a.date !== form.date ? `${fmtDay(a.date)} ` : ''}{fmtTime(a.time)}
+                </button>
+              </React.Fragment>
+            ))}.</>}
+            {' '}You can still book it anyway.
+          </Notice>
+        )}
+        {error && <Notice type="error">{error}</Notice>}
+      </form>
+    </Modal>
+  );
+}
+
 function useDepositAction(setBookings) {
   const toast = useToast();
   return useCallback(async (bookingId, action) => {
@@ -607,13 +751,15 @@ function DashboardHome({ business, go, queue }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     Promise.all([api('/api/analytics'), api('/api/bookings?limit=8')])
       .then(([a, b]) => { setAnalytics(a); setBookings(b.bookings || []); })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [reloadKey]);
 
   if (loading) return <Spinner />;
   if (error) return <div className="page-content"><Notice type="error">{error}</Notice></div>;
@@ -636,6 +782,8 @@ function DashboardHome({ business, go, queue }) {
 
   return (
     <div className="page-content">
+      {adding && <AddBookingDialog business={business} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); setReloadKey(k => k + 1); }} />}
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
       <div>
         <h2 style={{ fontSize: 22, fontWeight: 800 }}>{greeting}{ownerFirst ? `, ${ownerFirst}` : ''}.</h2>
         <p className="muted" style={{ marginTop: 4 }}>
@@ -643,6 +791,8 @@ function DashboardHome({ business, go, queue }) {
             ? 'Nothing booked for today yet. Bimbly is answering your calls.'
             : `You have ${today.length} appointment${today.length === 1 ? '' : 's'} today.`}
         </p>
+      </div>
+        <button className="btn btn--primary" onClick={() => setAdding(true)}><Icon name="plus" /> Add booking</button>
       </div>
 
       <div className="stats-row">
@@ -667,7 +817,7 @@ function DashboardHome({ business, go, queue }) {
                     <div className="daybook-name">{b.customer_name || 'Unknown caller'}</div>
                     <div className="daybook-meta">{[fmtServices(b.service_ids), b.preferred_barber && `with ${b.preferred_barber}`].filter(Boolean).join(' · ')}</div>
                   </div>
-                  <div className="daybook-aside"><StatusBadge status={b.status} /></div>
+                  <div className="daybook-aside row" style={{ gap: 6 }}><BookedBy booking={b} /><StatusBadge status={b.status} /></div>
                 </li>
               ))}
             </ul>
@@ -721,7 +871,9 @@ const BOOKING_FILTERS = [
   { id: 'month',    label: 'Last 30 days' },
 ];
 
-function BookingsPage({ clients, go }) {
+function BookingsPage({ business, clients, go }) {
+  const [adding, setAdding] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -750,11 +902,11 @@ function BookingsPage({ clients, go }) {
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, [filter]);
+  }, [filter, reloadKey]);
 
   const q = search.trim().toLowerCase();
   const shown = q
-    ? bookings.filter(b => [b.customer_name, b.customer_phone, fmtServices(b.service_ids), b.preferred_barber].some(v => String(v || '').toLowerCase().includes(q)))
+    ? bookings.filter(b => [b.customer_name, b.customer_phone, fmtServices(b.service_ids), b.preferred_barber, bookedByLabel(b).text].some(v => String(v || '').toLowerCase().includes(q)))
     : bookings;
 
   const emptyCopy = {
@@ -778,7 +930,9 @@ function BookingsPage({ clients, go }) {
           <Icon name="search" />
           <input className="input" type="search" placeholder="Search name, phone or service" aria-label="Search bookings" value={search} onChange={e => setSearch(e.target.value)} />
         </div>
+        <button className="btn btn--primary" style={{ marginLeft: 'auto' }} onClick={() => setAdding(true)}><Icon name="plus" /> Add booking</button>
       </div>
+      {adding && <AddBookingDialog business={business} onClose={() => setAdding(false)} onSaved={() => { setAdding(false); setReloadKey(k => k + 1); }} />}
 
       {error && <Notice type="error">{error}</Notice>}
 
@@ -2935,7 +3089,7 @@ function App() {
         <TopBar title={TITLES[known]} onMenu={() => setMenuOpen(true)} />
         <main className="content-area" id="main">
           {known === 'home'       && <DashboardHome business={business} go={go} queue={queue} />}
-          {known === 'bookings'   && <BookingsPage clients={clients} go={go} />}
+          {known === 'bookings'   && <BookingsPage business={business} clients={clients} go={go} />}
           {known === 'queue'      && <QueuePage business={business} go={go} onQueueChange={setQueue} />}
           {known === 'clients'    && <ClientsPage clients={clients} setClients={setClients} go={go} initialSearch={sub} />}
           {known === 'client'     && <ClientProfilePage key={sub} clientId={sub} setClients={setClients} go={go} />}

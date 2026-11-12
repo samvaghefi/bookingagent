@@ -9,6 +9,10 @@ const { rebuildAndPatchVapiPrompt } = require('./vapiService');
 const bcrypt = require('bcryptjs');
 const { DateTime } = require('luxon');
 const { passwordError } = require('./signupValidation');
+const availability = require('./availabilityService');
+const { createCalendarEvent } = require('./calendarService');
+const { sendCustomerSMS } = require('./notificationService');
+const { maybeScheduleReminder } = require('./reminderService');
 
 const BASE_URL = process.env.RENDER_EXTERNAL_URL || 'https://bookingagent-gmo2.onrender.com';
 
@@ -150,6 +154,122 @@ router.get('/api/bookings', async (req, res) => {
   } catch (err) {
     console.error('GET /api/bookings error:', err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/bookings — the owner or a team member adds a booking by hand.
+// Saved with source 'manual' and booked_by = the team member's name.
+// Uses the same "is this time free?" check as calls and the booking page;
+// if the time isn't free it answers 409 unless the request says force: true.
+const SLOT_REASONS = {
+  closed: 'The shop is closed that day.',
+  outside_hours: "That's outside your opening hours.",
+  past: 'That time has already passed.',
+  blocked: "That time is blocked off on your calendar.",
+  busy: 'That time is already booked.',
+  member_busy: 'That team member is already booked then.',
+};
+
+router.post('/api/bookings', async (req, res) => {
+  const b = req.body || {};
+  const str = v => (typeof v === 'string' ? v.trim() : '');
+  const customerName = str(b.customerName);
+  const customerPhone = str(b.customerPhone);
+  const customerEmail = str(b.customerEmail);
+  const service = str(b.service);
+  const date = str(b.date);
+  const time = str(b.time);
+  const teamMember = str(b.teamMember);
+  const notes = str(b.notes);
+  const bookedBy = str(b.bookedBy);
+
+  if (!customerName || customerName.length > 100) return res.status(400).json({ error: 'Enter the customer’s name.' });
+  if (customerPhone && !/^\+?[\d\s\-().]{7,20}$/.test(customerPhone)) return res.status(400).json({ error: 'That phone number doesn’t look right.' });
+  if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) return res.status(400).json({ error: 'That email address doesn’t look right.' });
+  if (!service || service.length > 100) return res.status(400).json({ error: 'Pick a service.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !DateTime.fromISO(date).isValid) return res.status(400).json({ error: 'Pick a date.' });
+  if (!/^\d{2}:\d{2}$/.test(time)) return res.status(400).json({ error: 'Pick a time.' });
+  if (notes.length > 500) return res.status(400).json({ error: 'Notes can be up to 500 characters.' });
+
+  const members = normalizeTeamMembers(req.business.team_members || req.business.barbers).map(m => m.name).filter(Boolean);
+  const ownerName = req.business.owner_name || '';
+  const allowedBookers = new Set([...members, ownerName].filter(Boolean));
+  if (!bookedBy || (allowedBookers.size && !allowedBookers.has(bookedBy))) {
+    return res.status(400).json({ error: 'Pick who is adding this booking.' });
+  }
+  if (teamMember && members.length && !members.includes(teamMember)) {
+    return res.status(400).json({ error: 'Pick a team member from your team.' });
+  }
+
+  try {
+    const { data: services } = await supabase
+      .from('services')
+      .select('name, duration_minutes')
+      .eq('business_id', req.business.id);
+    const match = (services || []).find(s => String(s.name).toLowerCase() === service.toLowerCase());
+    const duration = Number(match?.duration_minutes) || 60;
+
+    if (!b.force) {
+      try {
+        const slot = await availability.checkSlot(req.business, {
+          date, time, service, durationMinutes: duration, teamMember: teamMember || undefined,
+        });
+        if (!slot.available) {
+          return res.status(409).json({
+            error: SLOT_REASONS[slot.reason] || 'That time isn’t free.',
+            reason: slot.reason,
+            alternatives: slot.alternatives || [],
+          });
+        }
+      } catch (checkErr) {
+        console.error('POST /api/bookings availability check failed, saving anyway:', checkErr.message);
+      }
+    }
+
+    const record = {
+      business_id: req.business.id,
+      customer_name: customerName,
+      customer_phone: customerPhone || null,
+      customer_email: customerEmail || null,
+      service_ids: [match?.name || service],
+      appointment_date: date,
+      appointment_time: time + ':00',
+      duration_minutes: duration,
+      special_requests: notes || null,
+      preferred_barber: teamMember || null,
+      source: 'manual',
+      booked_by: bookedBy,
+      status: 'confirmed',
+      deposit_status: 'none',
+    };
+
+    let { data: booking, error } = await supabase.from('bookings').insert(record).select().single();
+    if (error && /booked_by/.test(error.message || '')) {
+      // Column not added yet (scripts/migrations/add-booked-by.sql): save without the name
+      console.warn('bookings.booked_by missing — run scripts/migrations/add-booked-by.sql');
+      const { booked_by, ...withoutName } = record;
+      ({ data: booking, error } = await supabase.from('bookings').insert(withoutName).select().single());
+    }
+    if (error) throw error;
+
+    // Calendar event + optional confirmation text; no owner email (they made it)
+    (async () => {
+      try {
+        await createCalendarEvent(req.business, booking);
+        if (b.textCustomer && booking.customer_phone) {
+          const sent = await sendCustomerSMS(req.business, booking);
+          if (sent) await supabase.from('bookings').update({ sms_sent: true }).eq('id', booking.id);
+          await maybeScheduleReminder(req.business, booking);
+        }
+      } catch (e) {
+        console.error('Manual booking follow-up error:', e.message);
+      }
+    })();
+
+    res.status(201).json({ booking });
+  } catch (err) {
+    console.error('POST /api/bookings error:', err.message);
+    res.status(500).json({ error: 'Couldn’t save the booking. Please try again.' });
   }
 });
 
