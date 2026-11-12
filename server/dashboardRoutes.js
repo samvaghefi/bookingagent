@@ -205,6 +205,35 @@ router.get('/api/analytics', async (req, res) => {
     const isCounted = b => b.appointment_date && b.customer_name && !['cancelled', 'canceled'].includes(String(b.status || '').toLowerCase());
     const bookings = (fetched || []).filter(isCounted);
 
+    // Walk-ins count too (dated by when they checked in, in the shop's time zone).
+    // No-shows and entries removed by mistake are left out. If the walk-in table
+    // can't be read, the dashboard still shows the bookings.
+    const tz = now.zoneName;
+    const { data: walkIns, error: walkInError } = await supabase
+      .from('walk_in_queue')
+      .select('*')
+      .eq('business_id', req.business.id)
+      .gte('created_at', DateTime.fromISO(fetchFrom, { zone: tz }).startOf('day').toUTC().toISO())
+      .lte('created_at', DateTime.fromISO(fetchTo, { zone: tz }).endOf('day').toUTC().toISO());
+    if (walkInError) console.error('GET /api/analytics walk-ins error:', walkInError.message);
+    (walkIns || [])
+      .filter(w => w.created_at && !['no_show', 'removed'].includes(String(w.status || '').toLowerCase()))
+      .forEach(w => {
+        const at = DateTime.fromISO(w.served_at || w.created_at, { zone: 'utc' }).setZone(tz);
+        if (!at.isValid) return;
+        bookings.push({
+          id: `walkin-${w.id}`,
+          source: 'walk_in',
+          customer_name: w.customer_name || 'Walk-in',
+          customer_phone: w.customer_phone || null,
+          appointment_date: DateTime.fromISO(w.created_at, { zone: 'utc' }).setZone(tz).toISODate(),
+          appointment_time: at.toFormat('HH:mm:ss'),
+          service_ids: w.service ? [w.service] : [],
+          preferred_barber: w.preferred_barber || null,
+          status: 'walk-in',
+        });
+      });
+
     // "This month" = everything booked in the calendar month, including upcoming appointments
     const thisMonthBookings = bookings.filter(b => b.appointment_date >= thisMonthStr && b.appointment_date <= endOfMonthStr);
     const lastMonthBookings = bookings.filter(b => b.appointment_date >= lastMonthStr && b.appointment_date < thisMonthStr);
